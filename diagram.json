@@ -6,11 +6,57 @@
         {
             "type": "board-esp32-s3-devkitc-1",
             "id": "esp",
-            "top": 0.59,
-            "left": 0.67,
+            "top": 0,
+            "left": 0,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-led",
+            "id": "led1",
+            "top": 140.4,
+            "left": -226.6,
             "attrs": {
-                "flashSize": "16"
+                "color": "green"
             }
+        },
+        {
+            "type": "wokwi-led",
+            "id": "led2",
+            "top": 140.4,
+            "left": -169,
+            "attrs": {
+                "color": "red"
+            }
+        },
+        {
+            "type": "wokwi-led",
+            "id": "led3",
+            "top": 140.4,
+            "left": -197.8,
+            "attrs": {
+                "color": "blue"
+            }
+        },
+        {
+            "type": "wokwi-ntc-temperature-sensor",
+            "id": "ntc1",
+            "top": 31.4,
+            "left": -211.8,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd1",
+            "top": 240,
+            "left": 114.6,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc1",
+            "top": -18.44,
+            "left": -28.8,
+            "attrs": {}
         }
     ],
     "connections": [
@@ -25,6 +71,98 @@
             "$serialMonitor:TX",
             "",
             []
+        ],
+        [
+            "esp:GND.1",
+            "led1:C",
+            "black",
+            [
+                "h0"
+            ]
+        ],
+        [
+            "led3:C",
+            "esp:GND.1",
+            "green",
+            [
+                "v48",
+                "h0.4"
+            ]
+        ],
+        [
+            "led2:C",
+            "esp:GND.1",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "led1:A",
+            "esp:14",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "led3:A",
+            "esp:13",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "led2:A",
+            "esp:12",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "ntc1:GND",
+            "esp:GND.1",
+            "black",
+            [
+                "h38.4",
+                "v172.8"
+            ]
+        ],
+        [
+            "ntc1:VCC",
+            "esp:5V",
+            "red",
+            [
+                "h28.8",
+                "v153.6"
+            ]
+        ],
+        [
+            "ntc1:OUT",
+            "esp:11",
+            "green",
+            [
+                "h0",
+                "v105.5"
+            ]
+        ],
+        [
+            "esp:GND.4",
+            "gnd1:GND",
+            "black",
+            [
+                "h0"
+            ]
+        ],
+        [
+            "esp:3V3.1",
+            "vcc1:VCC",
+            "green",
+            [
+                "v0"
+            ]
         ]
     ],
     "serialMonitor": {
