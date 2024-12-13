@@ -1,13 +1,13 @@
 {
     "version": 1,
+    "author": "Anonymous maker",
     "editor": "wokwi",
-    "author": "phil <philip.barlow@hidglobal.com>",
     "parts": [
         {
             "type": "board-esp32-s3-devkitc-1",
             "id": "esp",
-            "top": 0,
-            "left": 0,
+            "top": -0.18,
+            "left": 4.57,
             "attrs": {}
         },
         {
@@ -57,6 +57,16 @@
             "top": -18.44,
             "left": -28.8,
             "attrs": {}
+        },
+        {
+            "type": "wokwi-led-ring",
+            "id": "ring1",
+            "top": 335.96,
+            "left": 0.81,
+            "rotate": 180,
+            "attrs": {
+                "pixels": "32"
+            }
         }
     ],
     "connections": [
@@ -131,6 +141,15 @@
             ]
         ],
         [
+            "ntc1:VCC",
+            "esp:5V",
+            "red",
+            [
+                "h28.8",
+                "v153.6"
+            ]
+        ],
+        [
             "ntc1:OUT",
             "esp:11",
             "green",
@@ -156,17 +175,29 @@
             ]
         ],
         [
-            "ntc1:VCC",
-            "esp:3V3.2",
+            "ring1:GND",
+            "gnd1:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "ring1:VCC",
+            "esp:5V",
             "red",
             [
-                "h48",
-                "v-28.8"
+                "v0"
+            ]
+        ],
+        [
+            "ring1:DIN",
+            "esp:21",
+            "green",
+            [
+                "v0"
             ]
         ]
     ],
-    "serialMonitor": {
-        "display": "terminal",
-        "convertEol": true
-    }
+    "dependencies": {}
 }

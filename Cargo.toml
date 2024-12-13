@@ -38,5 +38,15 @@ esp-idf-svc = { version = "0.49", default-features = false }
 pid-ctrl = "0.1.4"
 dotenv = "0.15.0"
 
+esp-idf-sys = { version = "*", features = ["binstart"] }
+esp-idf-hal = "*"
+ws2812-esp32-rmt-driver = { version = "0.10.0", features = [
+    "smart-leds-trait",
+] }
+smart-leds = "0.4"
+smart-leds-trait = { version = "0.3" }
+# smart_led_effects = "0.1.7"
+smart_led_effects = { path = "../smart-led-effects-rs" }
+
 [build-dependencies]
 embuild = "0.32.0"
