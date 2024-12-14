@@ -2,11 +2,13 @@ use anyhow::Result;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::prelude::Peripherals;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 mod app_state;
 mod board;
 mod gpio;
 mod indicator;
-use gpio::pwm::{Pwm, PwmBuilder};
+use gpio::pwm::PwmBuilder;
+use gpio::relay::Relay;
 
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -51,6 +53,14 @@ fn main() -> Result<()> {
     boiler.set_duty_cycle(0.5);
     log::info!("Boiler: {}", boiler);
 
+    let mut solenoid = Relay::new(
+        peripherals.pins.gpio13,
+        Some(true),
+        std::time::Duration::from_millis(100),
+    );
+
+    solenoid.turn_on(Some(Duration::from_secs(5)));
+
     // FreeRtos::delay_ms(5000);
 
     let mut level = 0.0;
@@ -70,6 +80,7 @@ fn main() -> Result<()> {
             start = std::time::Instant::now();
         }
         boiler.tick();
+        solenoid.tick();
 
         FreeRtos::delay_ms(10);
     }
