@@ -1,9 +1,10 @@
 use esp_idf_svc::hal::gpio::{Output, OutputPin, PinDriver};
 use std::time::{Duration, Instant};
 
-#[derive(Clone, Debug)]
-enum State {
+#[derive(Copy, Clone, Debug, std::default::Default, PartialEq)]
+pub enum State {
     On,
+    #[default]
     Off,
     OnUntil(Instant),
     OffUntil(Instant),
@@ -29,17 +30,35 @@ impl Iterator for State {
                 Some(State::On)
             }
         };
-        if let Some(next) = next.clone() {
+        if let Some(next) = next {
             *self = next;
         }
         next
     }
 }
 
+impl State {
+    pub fn on(on_time: Option<Duration>) -> Self {
+        if let Some(on_time) = on_time {
+            State::OnUntil(Instant::now() + on_time)
+        } else {
+            State::On
+        }
+    }
+
+    pub fn off(off_time: Option<Duration>) -> Self {
+        if let Some(off_time) = off_time {
+            State::OffUntil(Instant::now() + off_time)
+        } else {
+            State::Off
+        }
+    }
+}
+
 pub struct Relay<'a, PD: OutputPin> {
     out: PinDriver<'a, PD, Output>,
     invert: bool,
-    current_state: State,
+    pub state: State,
     poll_interval: Duration,
     last_poll: Instant,
 }
@@ -52,31 +71,23 @@ where
         Relay {
             out: PinDriver::output(pin).expect("Failed to create relay"),
             invert: invert.unwrap_or(false),
-            current_state: State::Off,
+            state: State::Off,
             poll_interval,
             last_poll: Instant::now() - poll_interval,
         }
     }
 
     pub fn turn_on(&mut self, on_time: Option<Duration>) {
-        if let Some(on_time) = on_time {
-            self.set_state(State::OnUntil(Instant::now() + on_time));
-        } else {
-            self.set_state(State::On);
-        }
+        self.set_state(State::on(on_time));
     }
 
     pub fn turn_off(&mut self, off_time: Option<Duration>) {
-        if let Some(off_time) = off_time {
-            self.set_state(State::OnUntil(Instant::now() + off_time));
-        } else {
-            self.set_state(State::Off);
-        };
+        self.set_state(State::off(off_time));
     }
 
     fn set_state(&mut self, state: State) {
-        self.current_state = state;
-        match self.current_state {
+        self.state = state;
+        match self.state {
             State::On | State::OnUntil(_) => self.set_on(),
             _ => self.set_off(),
         };
@@ -104,7 +115,7 @@ where
             return self.poll_interval - time_since_last_poll;
         }
 
-        let next_state = self.current_state.next();
+        let next_state = self.state.next();
         if let Some(next_state) = next_state {
             self.set_state(next_state);
         }

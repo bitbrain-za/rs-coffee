@@ -7,6 +7,7 @@ mod app_state;
 mod board;
 mod gpio;
 mod indicator;
+use app_state::System;
 use gpio::pwm::PwmBuilder;
 use gpio::relay::Relay;
 
@@ -23,10 +24,8 @@ fn main() -> Result<()> {
     let led_pin = peripherals.pins.gpio21;
     let channel = peripherals.rmt.channel0;
 
-    let app_state = app_state::AppState::new();
-    let app_state = Arc::new(Mutex::new(app_state));
-
-    let app_state_indicator = app_state.clone();
+    let system = System::new();
+    let system_indicator = system.clone();
 
     std::thread::spawn(move || {
         let mut ring =
@@ -34,44 +33,84 @@ fn main() -> Result<()> {
         ring.set_state(indicator::ring::State::Busy);
 
         loop {
-            if ring.state != app_state_indicator.lock().unwrap().indicator_state {
-                ring.set_state(app_state_indicator.lock().unwrap().indicator_state);
+            let requested_indicator_state = system_indicator.get_indicator();
+            if ring.state != requested_indicator_state {
+                ring.set_state(requested_indicator_state);
             }
             let next_tick = ring.tick();
             FreeRtos::delay_ms(next_tick.as_millis() as u32);
         }
     });
 
-    app_state.lock().unwrap().indicator_state = indicator::ring::State::Busy;
+    system.set_indicator(indicator::ring::State::Busy);
 
-    let mut boiler = PwmBuilder::new()
-        .with_interval(std::time::Duration::from_millis(2000))
-        .with_pin(peripherals.pins.gpio12)
-        .with_poll_rate(std::time::Duration::from_millis(100))
-        .build();
+    // GPIO thread
+    let system_gpio = system.clone();
+    std::thread::spawn(move || {
+        let mut boiler = PwmBuilder::new()
+            .with_interval(std::time::Duration::from_millis(2000))
+            .with_pin(peripherals.pins.gpio12)
+            .with_poll_rate(std::time::Duration::from_millis(100))
+            .build();
 
-    boiler.set_duty_cycle(0.5);
-    log::info!("Boiler: {}", boiler);
+        let mut pump = PwmBuilder::new()
+            .with_interval(std::time::Duration::from_millis(500))
+            .with_pin(peripherals.pins.gpio14)
+            .with_poll_rate(std::time::Duration::from_millis(100))
+            .build();
 
-    let mut solenoid = Relay::new(
-        peripherals.pins.gpio13,
-        Some(true),
-        std::time::Duration::from_millis(100),
-    );
+        let mut solenoid = Relay::new(
+            peripherals.pins.gpio13,
+            Some(true),
+            std::time::Duration::from_millis(100),
+        );
 
-    solenoid.turn_on(Some(Duration::from_secs(5)));
+        loop {
+            let mut next_tick: Vec<Duration> = Vec::new();
+            let requested_boiler_duty_cycle = system_gpio.get_boiler_duty_cycle();
 
-    // FreeRtos::delay_ms(5000);
+            if boiler.get_duty_cycle() != requested_boiler_duty_cycle {
+                boiler.set_duty_cycle(requested_boiler_duty_cycle);
+            }
+            next_tick.push(boiler.tick());
 
+            let requested_pump_duty_cycle = system_gpio.get_pump_duty_cycle();
+            if pump.get_duty_cycle() != requested_pump_duty_cycle {
+                pump.set_duty_cycle(requested_pump_duty_cycle);
+            }
+            next_tick.push(pump.tick());
+
+            let requested_solenoid_state = system_gpio.get_solenoid_state();
+            if solenoid.state != requested_solenoid_state {
+                solenoid.state = requested_solenoid_state;
+            }
+            next_tick.push(solenoid.tick());
+
+            FreeRtos::delay_ms(
+                next_tick
+                    .iter()
+                    .min()
+                    .unwrap_or(&Duration::from_millis(100))
+                    .as_millis() as u32,
+            );
+        }
+    });
+
+    system.set_boiler_duty_cycle(0.5);
+    system.set_pump_duty_cycle(1.0);
+    system.solenoid_turn_on(Some(Duration::from_secs(5)));
+
+    // just a test loop
     let mut level = 0.0;
     let mut start = std::time::Instant::now() - std::time::Duration::from_millis(200);
     loop {
+        // test code for the indicator
         if start.elapsed() > std::time::Duration::from_millis(200) {
-            app_state.lock().unwrap().indicator_state = indicator::ring::State::Guage {
+            system.set_indicator(indicator::ring::State::Guage {
                 min: 0.0,
                 max: 100.0,
                 level,
-            };
+            });
 
             level += 1.0;
             if level > 100.0 {
@@ -79,8 +118,6 @@ fn main() -> Result<()> {
             }
             start = std::time::Instant::now();
         }
-        boiler.tick();
-        solenoid.tick();
 
         FreeRtos::delay_ms(10);
     }

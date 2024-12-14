@@ -6,11 +6,20 @@ use smart_led_effects::{
 use smart_leds_trait::SmartLedsWrite;
 use ws2812_esp32_rmt_driver::{Ws2812Esp32Rmt, RGB8 as Rgb};
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, std::default::Default)]
 pub enum State {
+    #[default]
     Off,
-    Temperature { min: f32, max: f32, level: f32 },
-    Guage { min: f32, max: f32, level: f32 },
+    Temperature {
+        min: f32,
+        max: f32,
+        level: f32,
+    },
+    Guage {
+        min: f32,
+        max: f32,
+        level: f32,
+    },
     Busy,
 }
 

@@ -45,6 +45,10 @@ where
         self.on_time = self.duty_cycle_to_on_time(duty_cycle, None);
     }
 
+    pub fn get_duty_cycle(&self) -> f32 {
+        self.on_time_to_duty_cycle(None, None)
+    }
+
     pub fn set_interval(&mut self, interval: Duration) {
         let current_dc = self.on_time_to_duty_cycle(None, None);
         self.interval = interval;
@@ -71,10 +75,38 @@ where
         Duration::from_secs_f32(interval.as_secs_f32() * duty_cycle)
     }
 
+    fn set_on(&mut self) {
+        match self.invert {
+            true => self.out.set_low(),
+            false => self.out.set_high(),
+        }
+        .expect("Failed to set relay on");
+    }
+
+    fn set_off(&mut self) {
+        match self.invert {
+            true => self.out.set_high(),
+            false => self.out.set_low(),
+        }
+        .expect("Failed to set relay off");
+    }
+
     pub fn tick(&mut self) -> Duration {
         let time_since_last_poll = self.last_poll.elapsed();
         if time_since_last_poll < self.poll_rate {
             return self.poll_rate - time_since_last_poll;
+        }
+
+        if self.on_time == Duration::from_secs(0) {
+            self.set_off();
+            self.last_poll = Instant::now();
+            return self.poll_rate;
+        }
+
+        if self.on_time == self.interval {
+            self.set_on();
+            self.last_poll = Instant::now();
+            return self.poll_rate;
         }
 
         let mut time_in_cycle = self.start_of_interval.elapsed();
@@ -83,16 +115,10 @@ where
             time_in_cycle = Duration::from_secs(0);
         }
 
-        let _ = if time_in_cycle < self.on_time {
-            match self.invert {
-                true => self.out.set_low(),
-                false => self.out.set_high(),
-            }
+        if time_in_cycle < self.on_time {
+            self.set_on()
         } else {
-            match self.invert {
-                true => self.out.set_high(),
-                false => self.out.set_low(),
-            }
+            self.set_off()
         };
 
         self.last_poll = Instant::now();
