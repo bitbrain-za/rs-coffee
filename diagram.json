@@ -66,7 +66,7 @@
             "left": -8.79,
             "rotate": 180,
             "attrs": {
-                "pixels": "32"
+                "pixels": "16"
             }
         },
         {
@@ -89,8 +89,8 @@
         {
             "type": "wokwi-potentiometer",
             "id": "pot1",
-            "top": 46.7,
-            "left": -86.6,
+            "top": -87.7,
+            "left": -77,
             "attrs": {}
         },
         {
@@ -124,7 +124,7 @@
         {
             "type": "wokwi-gnd",
             "id": "gnd5",
-            "top": 134.4,
+            "top": 0,
             "left": -77.4,
             "attrs": {}
         },
@@ -138,8 +138,8 @@
         {
             "type": "wokwi-vcc",
             "id": "vcc4",
-            "top": 19.96,
-            "left": -9.6,
+            "top": -28.04,
+            "left": 0,
             "attrs": {}
         },
         {
@@ -206,15 +206,6 @@
             "green",
             [
                 "v0"
-            ]
-        ],
-        [
-            "ntc1:OUT",
-            "esp:11",
-            "green",
-            [
-                "h0",
-                "v105.5"
             ]
         ],
         [
@@ -350,14 +341,6 @@
             ]
         ],
         [
-            "esp:10",
-            "pot1:SIG",
-            "green",
-            [
-                "h0"
-            ]
-        ],
-        [
             "esp:35",
             "cell1:SCK",
             "green",
@@ -387,6 +370,22 @@
             "green",
             [
                 "h0"
+            ]
+        ],
+        [
+            "pot1:SIG",
+            "esp:4",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "ntc1:OUT",
+            "esp:5",
+            "green",
+            [
+                "v0"
             ]
         ]
     ],

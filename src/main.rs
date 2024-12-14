@@ -1,13 +1,14 @@
 use anyhow::Result;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::prelude::Peripherals;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 mod app_state;
 mod board;
 mod gpio;
 mod indicator;
+mod sensors;
 use app_state::System;
+use esp_idf_svc::hal::adc::{AdcContConfig, AdcContDriver, Attenuated};
 use gpio::pwm::PwmBuilder;
 use gpio::relay::Relay;
 
@@ -43,6 +44,20 @@ fn main() -> Result<()> {
     });
 
     system.set_indicator(indicator::ring::State::Busy);
+
+    let config = AdcContConfig::default();
+
+    let adc_1_channel_3 = Attenuated::db11(peripherals.pins.gpio4);
+
+    let adc: AdcContDriver<'_> = AdcContDriver::new(peripherals.adc1, &config, adc_1_channel_3)
+        .expect("Failed to initialize ADC driver");
+
+    let temp = gpio::adc::Adc::new(system.clone(), adc);
+
+    // ADC thread
+    std::thread::spawn(move || {
+        temp.start();
+    });
 
     // GPIO thread
     let system_gpio = system.clone();
@@ -119,6 +134,9 @@ fn main() -> Result<()> {
             start = std::time::Instant::now();
         }
 
-        FreeRtos::delay_ms(10);
+        let boiler_temperature = system.get_boiler_temperature();
+        println!("Boiler temperature: {}", boiler_temperature);
+
+        FreeRtos::delay_ms(1000);
     }
 }
