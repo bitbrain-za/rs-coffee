@@ -40,15 +40,16 @@
         {
             "type": "wokwi-ntc-temperature-sensor",
             "id": "ntc1",
-            "top": 31.4,
-            "left": -211.8,
+            "top": -65.1,
+            "left": -192.5,
+            "rotate": 90,
             "attrs": {}
         },
         {
             "type": "wokwi-gnd",
             "id": "gnd1",
-            "top": 240,
-            "left": 114.6,
+            "top": 249.6,
+            "left": 162.6,
             "attrs": {}
         },
         {
@@ -62,11 +63,112 @@
             "type": "wokwi-led-ring",
             "id": "ring1",
             "top": 335.96,
-            "left": 0.81,
+            "left": -8.79,
             "rotate": 180,
             "attrs": {
                 "pixels": "32"
             }
+        },
+        {
+            "type": "wokwi-hx711",
+            "id": "cell1",
+            "top": -63.2,
+            "left": 284,
+            "rotate": 270,
+            "attrs": {
+                "type": "5kg"
+            }
+        },
+        {
+            "type": "wokwi-hc-sr04",
+            "id": "ultrasonic1",
+            "top": -152.1,
+            "left": 43.9,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-potentiometer",
+            "id": "pot1",
+            "top": 46.7,
+            "left": -86.6,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd2",
+            "top": 96,
+            "left": 335.4,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc2",
+            "top": 19.96,
+            "left": -220.8,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd3",
+            "top": -48,
+            "left": 172.2,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd4",
+            "top": 57.6,
+            "left": -115.8,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd5",
+            "top": 134.4,
+            "left": -77.4,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc3",
+            "top": -124.04,
+            "left": 9.6,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc4",
+            "top": 19.96,
+            "left": -9.6,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd6",
+            "top": 374.4,
+            "left": 162.6,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc5",
+            "top": 279.16,
+            "left": 67.2,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc6",
+            "top": 77.56,
+            "left": 412.8,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd7",
+            "top": 259.2,
+            "left": -250.2,
+            "attrs": {}
         }
     ],
     "connections": [
@@ -81,31 +183,6 @@
             "$serialMonitor:TX",
             "",
             []
-        ],
-        [
-            "esp:GND.1",
-            "led1:C",
-            "black",
-            [
-                "h0"
-            ]
-        ],
-        [
-            "led3:C",
-            "esp:GND.1",
-            "green",
-            [
-                "v48",
-                "h0.4"
-            ]
-        ],
-        [
-            "led2:C",
-            "esp:GND.1",
-            "green",
-            [
-                "v0"
-            ]
         ],
         [
             "led1:A",
@@ -132,24 +209,6 @@
             ]
         ],
         [
-            "ntc1:GND",
-            "esp:GND.1",
-            "black",
-            [
-                "h38.4",
-                "v172.8"
-            ]
-        ],
-        [
-            "ntc1:VCC",
-            "esp:5V",
-            "red",
-            [
-                "h28.8",
-                "v153.6"
-            ]
-        ],
-        [
             "ntc1:OUT",
             "esp:11",
             "green",
@@ -169,22 +228,6 @@
         [
             "esp:3V3.1",
             "vcc1:VCC",
-            "green",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "ring1:GND",
-            "gnd1:GND",
-            "black",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "ring1:VCC",
-            "esp:5V",
             "red",
             [
                 "v0"
@@ -196,6 +239,154 @@
             "green",
             [
                 "v0"
+            ]
+        ],
+        [
+            "ntc1:VCC",
+            "vcc2:VCC",
+            "red",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "gnd4:GND",
+            "ntc1:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "ring1:GND",
+            "gnd6:GND",
+            "black",
+            [
+                "h48",
+                "v38.4"
+            ]
+        ],
+        [
+            "ring1:VCC",
+            "vcc5:VCC",
+            "red",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "ultrasonic1:VCC",
+            "vcc3:VCC",
+            "red",
+            [
+                "v28.8",
+                "h-19.2"
+            ]
+        ],
+        [
+            "ultrasonic1:GND",
+            "gnd3:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "gnd5:GND",
+            "pot1:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "pot1:VCC",
+            "vcc4:VCC",
+            "red",
+            [
+                "v19.2",
+                "h8.8"
+            ]
+        ],
+        [
+            "cell1:GND",
+            "gnd2:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "cell1:VCC",
+            "vcc6:VCC",
+            "red",
+            [
+                "v28.8",
+                "h48"
+            ]
+        ],
+        [
+            "led1:C",
+            "gnd7:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "led3:C",
+            "gnd7:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "led2:C",
+            "gnd7:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "esp:10",
+            "pot1:SIG",
+            "green",
+            [
+                "h0"
+            ]
+        ],
+        [
+            "esp:35",
+            "cell1:SCK",
+            "green",
+            [
+                "h0"
+            ]
+        ],
+        [
+            "esp:36",
+            "cell1:DT",
+            "green",
+            [
+                "h0"
+            ]
+        ],
+        [
+            "ultrasonic1:ECHO",
+            "esp:17",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "esp:16",
+            "ultrasonic1:TRIG",
+            "green",
+            [
+                "h0"
             ]
         ]
     ],

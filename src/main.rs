@@ -4,7 +4,9 @@ use esp_idf_svc::hal::prelude::Peripherals;
 use std::sync::{Arc, Mutex};
 mod app_state;
 mod board;
+mod gpio;
 mod indicator;
+use gpio::pwm::{Pwm, PwmBuilder};
 
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -40,7 +42,16 @@ fn main() -> Result<()> {
 
     app_state.lock().unwrap().indicator_state = indicator::ring::State::Busy;
 
-    FreeRtos::delay_ms(5000);
+    let mut boiler = PwmBuilder::new()
+        .with_interval(std::time::Duration::from_millis(2000))
+        .with_pin(peripherals.pins.gpio12)
+        .with_poll_rate(std::time::Duration::from_millis(100))
+        .build();
+
+    boiler.set_duty_cycle(0.5);
+    log::info!("Boiler: {}", boiler);
+
+    // FreeRtos::delay_ms(5000);
 
     let mut level = 0.0;
     let mut start = std::time::Instant::now() - std::time::Duration::from_millis(200);
@@ -58,7 +69,8 @@ fn main() -> Result<()> {
             }
             start = std::time::Instant::now();
         }
+        boiler.tick();
 
-        FreeRtos::delay_ms(100);
+        FreeRtos::delay_ms(10);
     }
 }
