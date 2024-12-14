@@ -1,6 +1,8 @@
 use anyhow::Result;
+use esp_idf_hal::adc;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::prelude::Peripherals;
+use gpio::adc::Adc;
 use std::time::Duration;
 mod app_state;
 mod board;
@@ -8,9 +10,13 @@ mod gpio;
 mod indicator;
 mod sensors;
 use app_state::System;
-use esp_idf_svc::hal::adc::{AdcContConfig, AdcContDriver, Attenuated};
+use esp_idf_hal::adc::attenuation::DB_11;
+use esp_idf_hal::adc::oneshot::config::AdcChannelConfig;
+use esp_idf_hal::adc::oneshot::*;
+use esp_idf_svc::hal::adc::oneshot::AdcDriver;
 use gpio::pwm::PwmBuilder;
 use gpio::relay::Relay;
+use sensors::boiler_temperature::BoilerTemperature;
 
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -45,18 +51,31 @@ fn main() -> Result<()> {
 
     system.set_indicator(indicator::ring::State::Busy);
 
-    let config = AdcContConfig::default();
-
-    let adc_1_channel_3 = Attenuated::db11(peripherals.pins.gpio4);
-
-    let adc: AdcContDriver<'_> = AdcContDriver::new(peripherals.adc1, &config, adc_1_channel_3)
-        .expect("Failed to initialize ADC driver");
-
-    let temp = gpio::adc::Adc::new(system.clone(), adc);
-
-    // ADC thread
+    let system_adc = system.clone();
+    // ADC Thread
     std::thread::spawn(move || {
-        temp.start();
+        let adc = AdcDriver::new(peripherals.adc1).expect("Failed to create ADC driver");
+        let config = AdcChannelConfig {
+            attenuation: DB_11,
+            calibration: true,
+            ..Default::default()
+        };
+
+        let temperature_probe = AdcChannelDriver::new(&adc, peripherals.pins.gpio4, &config)
+            .expect("Failed to create ADC channel temperature");
+        let pressure_probe = AdcChannelDriver::new(&adc, peripherals.pins.gpio5, &config)
+            .expect("Failed to create ADC channel pressure");
+
+        let mut adc = Adc::new(
+            temperature_probe,
+            pressure_probe,
+            std::time::Duration::from_millis(10),
+            system_adc,
+        );
+        loop {
+            let next_tick = adc.poll();
+            FreeRtos::delay_ms(next_tick.as_millis() as u32);
+        }
     });
 
     // GPIO thread
@@ -135,7 +154,9 @@ fn main() -> Result<()> {
         }
 
         let boiler_temperature = system.get_boiler_temperature();
+        let pump_pressure = system.get_pump_pressure();
         println!("Boiler temperature: {}", boiler_temperature);
+        println!("Pump pressure: {}", pump_pressure);
 
         FreeRtos::delay_ms(1000);
     }

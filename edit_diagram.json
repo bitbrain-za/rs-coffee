@@ -38,14 +38,6 @@
             }
         },
         {
-            "type": "wokwi-ntc-temperature-sensor",
-            "id": "ntc1",
-            "top": -65.1,
-            "left": -192.5,
-            "rotate": 90,
-            "attrs": {}
-        },
-        {
             "type": "wokwi-gnd",
             "id": "gnd1",
             "top": 249.6,
@@ -66,7 +58,7 @@
             "left": -8.79,
             "rotate": 180,
             "attrs": {
-                "pixels": "16"
+                "pixels": "32"
             }
         },
         {
@@ -87,13 +79,6 @@
             "attrs": {}
         },
         {
-            "type": "wokwi-potentiometer",
-            "id": "pot1",
-            "top": -87.7,
-            "left": -77,
-            "attrs": {}
-        },
-        {
             "type": "wokwi-gnd",
             "id": "gnd2",
             "top": 96,
@@ -101,31 +86,10 @@
             "attrs": {}
         },
         {
-            "type": "wokwi-vcc",
-            "id": "vcc2",
-            "top": 19.96,
-            "left": -220.8,
-            "attrs": {}
-        },
-        {
             "type": "wokwi-gnd",
             "id": "gnd3",
             "top": -48,
             "left": 172.2,
-            "attrs": {}
-        },
-        {
-            "type": "wokwi-gnd",
-            "id": "gnd4",
-            "top": 57.6,
-            "left": -115.8,
-            "attrs": {}
-        },
-        {
-            "type": "wokwi-gnd",
-            "id": "gnd5",
-            "top": 0,
-            "left": -77.4,
             "attrs": {}
         },
         {
@@ -138,8 +102,8 @@
         {
             "type": "wokwi-vcc",
             "id": "vcc4",
-            "top": -28.04,
-            "left": 0,
+            "top": -85.64,
+            "left": -220.8,
             "attrs": {}
         },
         {
@@ -168,6 +132,33 @@
             "id": "gnd7",
             "top": 259.2,
             "left": -250.2,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-slide-potentiometer",
+            "id": "pot3",
+            "top": -177.2,
+            "left": -245.6,
+            "rotate": 270,
+            "attrs": {
+                "travelLength": "30"
+            }
+        },
+        {
+            "type": "wokwi-slide-potentiometer",
+            "id": "pot1",
+            "top": -177.2,
+            "left": -168.8,
+            "rotate": 270,
+            "attrs": {
+                "travelLength": "30"
+            }
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd4",
+            "top": -220.8,
+            "left": -202.2,
             "attrs": {}
         }
     ],
@@ -233,22 +224,6 @@
             ]
         ],
         [
-            "ntc1:VCC",
-            "vcc2:VCC",
-            "red",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "gnd4:GND",
-            "ntc1:GND",
-            "black",
-            [
-                "v0"
-            ]
-        ],
-        [
             "ring1:GND",
             "gnd6:GND",
             "black",
@@ -280,23 +255,6 @@
             "black",
             [
                 "v0"
-            ]
-        ],
-        [
-            "gnd5:GND",
-            "pot1:GND",
-            "black",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "pot1:VCC",
-            "vcc4:VCC",
-            "red",
-            [
-                "v19.2",
-                "h8.8"
             ]
         ],
         [
@@ -373,6 +331,40 @@
             ]
         ],
         [
+            "gnd4:GND",
+            "pot3:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "pot3:GND",
+            "pot1:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "pot3:VCC",
+            "vcc4:VCC",
+            "red",
+            [
+                "v38.4",
+                "h-48"
+            ]
+        ],
+        [
+            "pot1:VCC",
+            "vcc4:VCC",
+            "red",
+            [
+                "v38.4",
+                "h-115.2"
+            ]
+        ],
+        [
             "pot1:SIG",
             "esp:4",
             "green",
@@ -381,7 +373,7 @@
             ]
         ],
         [
-            "ntc1:OUT",
+            "pot3:SIG",
             "esp:5",
             "green",
             [
