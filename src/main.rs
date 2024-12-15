@@ -20,10 +20,7 @@ use gpio::relay::Relay;
 mod config;
 
 fn main() -> Result<()> {
-    // It is necessary to call this function once. Otherwise some patches to the runtime
-    // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
-    // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
     let peripherals = Peripherals::take().unwrap();
@@ -146,6 +143,7 @@ fn main() -> Result<()> {
     });
 
     // GPIO thread
+    log::info!("Setting up Outputs");
     let system_gpio = system.clone();
     std::thread::spawn(move || {
         let mut boiler = PwmBuilder::new()
@@ -197,15 +195,15 @@ fn main() -> Result<()> {
         }
     });
 
+    log::info!("Setup complete, starting main loop");
+    /**************** TEST SECTION  ****************/
     system.set_boiler_duty_cycle(0.5);
     system.set_pump_duty_cycle(1.0);
     system.solenoid_turn_on(Some(Duration::from_secs(5)));
 
-    // just a test loop
     let mut level = 0.0;
     let mut start = std::time::Instant::now() - std::time::Duration::from_millis(200);
     loop {
-        // test code for the indicator
         if start.elapsed() > std::time::Duration::from_millis(200) {
             system.set_indicator(indicator::ring::State::Guage {
                 min: 0.0,
@@ -238,4 +236,5 @@ fn main() -> Result<()> {
 
         thread::sleep(Duration::from_millis(1000));
     }
+    /***********************************************/
 }
