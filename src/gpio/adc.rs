@@ -97,6 +97,7 @@ where
                 self.raw_to_voltage(average_pressure_sample, AdcSimulation::Pressure);
 
             self.samples.clear();
+
             self.system.set_pump_pressure(average_pressure);
 
             match self

@@ -7,6 +7,7 @@ mod app_state;
 mod gpio;
 mod indicator;
 mod sensors;
+use crate::sensors::scale::Scale;
 use app_state::System;
 use esp_idf_hal::adc::attenuation::DB_11;
 use esp_idf_hal::adc::oneshot::config::AdcChannelConfig;
@@ -15,6 +16,9 @@ use esp_idf_hal::gpio::{InterruptType, PinDriver, Pull};
 use esp_idf_svc::hal::adc::oneshot::AdcDriver;
 use gpio::pwm::PwmBuilder;
 use gpio::relay::Relay;
+
+// const LOAD_SENSOR_SCALING: f32 = 0.0027;
+const LOAD_SENSOR_SCALING: f32 = 4.761905;
 
 fn main() -> Result<()> {
     dotenv::dotenv().ok();
@@ -83,12 +87,30 @@ fn main() -> Result<()> {
             .unwrap();
     }
 
+    let dt = peripherals.pins.gpio36;
+    let sck = peripherals.pins.gpio35;
+    let system_scale = system.clone();
+    let mut scale = Scale::new(
+        sck,
+        dt,
+        LOAD_SENSOR_SCALING,
+        Duration::from_millis(100),
+        system_scale,
+    )
+    .unwrap();
+
+    scale.tare(32);
+
+    while !scale.is_ready() {
+        FreeRtos::delay_ms(100);
+    }
+
     button_brew.enable_interrupt()?;
     button_steam.enable_interrupt()?;
     button_hot_water.enable_interrupt()?;
 
     let system_adc = system.clone();
-    // ADC Thread
+    // Sensor Thread
     std::thread::spawn(move || {
         let adc = AdcDriver::new(peripherals.adc1).expect("Failed to create ADC driver");
         let config = AdcChannelConfig {
@@ -109,8 +131,14 @@ fn main() -> Result<()> {
             system_adc,
         );
         loop {
-            let next_tick = adc.poll();
-            FreeRtos::delay_ms(next_tick.as_millis() as u32);
+            let next_tick: Vec<Duration> = vec![adc.poll(), scale.poll()];
+            FreeRtos::delay_ms(
+                next_tick
+                    .iter()
+                    .min()
+                    .unwrap_or(&Duration::from_millis(100))
+                    .as_millis() as u32,
+            );
         }
     });
 
@@ -193,6 +221,7 @@ fn main() -> Result<()> {
         let pump_pressure = system.get_pump_pressure();
         println!("Boiler temperature: {}", boiler_temperature);
         println!("Pump pressure: {}", pump_pressure);
+        println!("Weight: {}", system.get_weight());
 
         let presses = system.button_presses();
         if !presses.is_empty() {

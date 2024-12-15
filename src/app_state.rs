@@ -26,6 +26,8 @@ pub struct AppState {
     pub solenoid_state: RelayState,
     pub pump_state: PumpState,
 
+    pub weight: f32,
+
     pub brew_button: Button,
     pub steam_button: Button,
     pub hot_water_button: Button,
@@ -199,5 +201,13 @@ impl System {
         }
 
         buttons
+    }
+
+    pub fn set_weight(&self, weight: f32) {
+        self.app_state.lock().unwrap().weight = weight;
+    }
+
+    pub fn get_weight(&self) -> f32 {
+        self.app_state.lock().unwrap().weight
     }
 }

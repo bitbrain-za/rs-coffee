@@ -47,6 +47,7 @@ smart-leds = "0.4"
 smart-leds-trait = { version = "0.3" }
 # smart_led_effects = "0.1.7"
 smart_led_effects = { path = "../smart-led-effects-rs" }
+loadcell = "0.2.0"
 
 [build-dependencies]
 embuild = "0.32.0"
