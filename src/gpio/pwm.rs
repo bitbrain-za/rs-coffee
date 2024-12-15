@@ -7,8 +7,6 @@ pub struct Pwm<'a, PD: OutputPin> {
     on_time: Duration,
     start_of_interval: Instant,
     invert: bool,
-    poll_rate: Duration,
-    last_poll: Instant,
 }
 
 impl<'a, PD> std::fmt::Display for Pwm<'a, PD>
@@ -28,15 +26,13 @@ impl<'a, PD> Pwm<'a, PD>
 where
     PD: OutputPin,
 {
-    pub fn new(pin: PD, interval: Duration, poll_rate: Duration, invert: Option<bool>) -> Self {
+    pub fn new(pin: PD, interval: Duration, invert: Option<bool>) -> Self {
         Pwm {
             out: PinDriver::output(pin).unwrap(),
             interval,
             on_time: Duration::from_secs(0),
             start_of_interval: Instant::now(),
             invert: invert.unwrap_or(false),
-            last_poll: Instant::now() - poll_rate,
-            poll_rate,
         }
     }
 
@@ -92,22 +88,15 @@ where
         .expect("Failed to set relay off");
     }
 
-    pub fn tick(&mut self) -> Duration {
-        let time_since_last_poll = self.last_poll.elapsed();
-        if time_since_last_poll < self.poll_rate {
-            return self.poll_rate - time_since_last_poll;
-        }
-
+    pub fn tick(&mut self) -> Option<Duration> {
         if self.on_time == Duration::from_secs(0) {
             self.set_off();
-            self.last_poll = Instant::now();
-            return self.poll_rate;
+            return None;
         }
 
         if self.on_time == self.interval {
             self.set_on();
-            self.last_poll = Instant::now();
-            return self.poll_rate;
+            return None;
         }
 
         let mut time_in_cycle = self.start_of_interval.elapsed();
@@ -116,21 +105,21 @@ where
             time_in_cycle = Duration::from_secs(0);
         }
 
-        if time_in_cycle < self.on_time {
-            self.set_on()
+        let time_to_state_change = if time_in_cycle < self.on_time {
+            self.set_on();
+            self.on_time
         } else {
-            self.set_off()
+            self.set_off();
+            self.interval - self.on_time
         };
 
-        self.last_poll = Instant::now();
-        self.poll_rate
+        Some(time_to_state_change)
     }
 }
 
 pub struct PwmBuilder<'a, PD: OutputPin> {
     pin: Option<PD>,
     interval: Option<Duration>,
-    poll_rate: Option<Duration>,
     invert: Option<bool>,
     _phantom: std::marker::PhantomData<&'a PD>,
 }
@@ -144,7 +133,6 @@ where
             pin: None,
             interval: None,
             invert: None,
-            poll_rate: None,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -165,15 +153,9 @@ where
         self
     }
 
-    pub fn with_poll_rate(mut self, poll_rate: Duration) -> Self {
-        self.poll_rate = Some(poll_rate);
-        self
-    }
-
     pub fn build(self) -> Pwm<'a, PD> {
         let pin = self.pin.expect("Pin is required");
         let interval = self.interval.expect("Interval is required");
-        let poll_rate = self.poll_rate.expect("Poll rate is required");
-        Pwm::new(pin, interval, poll_rate, self.invert)
+        Pwm::new(pin, interval, self.invert)
     }
 }

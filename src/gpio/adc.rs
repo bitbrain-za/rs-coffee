@@ -41,6 +41,7 @@ where
         adc1: AdcChannelDriver<'a, T, M>,
         adc2: AdcChannelDriver<'a, P, N>,
         poll_interval: Duration,
+        samples: usize,
         system: System,
     ) -> Self {
         // [ ] these are probably wrong
@@ -58,7 +59,7 @@ where
             system,
             raw_to_vin_factor: vin_div_top,
             samples: Vec::new(),
-            samples_to_average: 100,
+            samples_to_average: samples,
             boiler_probe,
         }
     }

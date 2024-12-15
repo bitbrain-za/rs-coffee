@@ -21,6 +21,8 @@ where
     poll_interval: Duration,
     next_poll: Instant,
     system: System,
+    samples: Vec<f32>,
+    samples_to_average: usize,
 }
 
 impl<'a, SckPin, DtPin> Scale<'a, SckPin, DtPin>
@@ -34,6 +36,7 @@ where
         scaling: f32,
         poll_interval: Duration,
         system: System,
+        samples: usize,
     ) -> Result<Self> {
         let dt = PinDriver::input(data_pin)?;
         let sck = PinDriver::output(clock_pin)?;
@@ -46,6 +49,8 @@ where
             poll_interval,
             next_poll: Instant::now(),
             system,
+            samples: Vec::new(),
+            samples_to_average: samples,
         })
     }
 
@@ -63,7 +68,16 @@ where
         }
         match self.load_sensor.read_scaled() {
             Ok(reading) => {
-                self.system.set_weight(reading);
+                if self.samples_to_average > 0 {
+                    self.samples.push(reading);
+                    if self.samples.len() > self.samples_to_average {
+                        let reading = self.samples.iter().sum::<f32>() / self.samples.len() as f32;
+                        self.system.set_weight(reading);
+                        self.samples.clear();
+                    }
+                } else {
+                    self.system.set_weight(reading);
+                }
             }
             Err(e) => {
                 log::error!("Failed to read from load sensor: {:?}", e);

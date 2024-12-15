@@ -59,21 +59,17 @@ pub struct Relay<'a, PD: OutputPin> {
     out: PinDriver<'a, PD, Output>,
     invert: bool,
     pub state: State,
-    poll_interval: Duration,
-    last_poll: Instant,
 }
 
 impl<'a, PD> Relay<'a, PD>
 where
     PD: OutputPin,
 {
-    pub fn new(pin: PD, invert: Option<bool>, poll_interval: Duration) -> Self {
+    pub fn new(pin: PD, invert: Option<bool>) -> Self {
         Relay {
             out: PinDriver::output(pin).expect("Failed to create relay"),
             invert: invert.unwrap_or(false),
             state: State::Off,
-            poll_interval,
-            last_poll: Instant::now() - poll_interval,
         }
     }
 
@@ -87,12 +83,26 @@ where
         self.set_state(State::off(off_time));
     }
 
-    fn set_state(&mut self, state: State) {
+    fn set_state(&mut self, state: State) -> Option<Duration> {
         self.state = state;
         match self.state {
-            State::On | State::OnUntil(_) => self.set_on(),
-            _ => self.set_off(),
-        };
+            State::On => {
+                self.set_on();
+                None
+            }
+            State::OnUntil(instant) => {
+                self.set_on();
+                Some(instant - Instant::now())
+            }
+            State::Off => {
+                self.set_off();
+                None
+            }
+            State::OffUntil(instant) => {
+                self.set_off();
+                Some(instant - Instant::now())
+            }
+        }
     }
 
     fn set_on(&mut self) {
@@ -111,18 +121,12 @@ where
         .expect("Failed to set relay off");
     }
 
-    pub fn tick(&mut self) -> Duration {
-        let time_since_last_poll = self.last_poll.elapsed();
-        if time_since_last_poll < self.poll_interval {
-            return self.poll_interval - time_since_last_poll;
-        }
-
+    pub fn tick(&mut self) -> Option<Duration> {
         let next_state = self.state.next();
         if let Some(next_state) = next_state {
-            self.set_state(next_state);
+            self.set_state(next_state)
+        } else {
+            None
         }
-
-        self.last_poll = Instant::now();
-        self.poll_interval
     }
 }

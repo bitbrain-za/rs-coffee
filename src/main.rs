@@ -16,12 +16,9 @@ use esp_idf_hal::gpio::{InterruptType, PinDriver, Pull};
 use esp_idf_svc::hal::adc::oneshot::AdcDriver;
 use gpio::pwm::PwmBuilder;
 use gpio::relay::Relay;
-
-// const LOAD_SENSOR_SCALING: f32 = 0.0027;
-const LOAD_SENSOR_SCALING: f32 = 4.761905;
+mod config;
 
 fn main() -> Result<()> {
-    dotenv::dotenv().ok();
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
@@ -93,9 +90,10 @@ fn main() -> Result<()> {
     let mut scale = Scale::new(
         sck,
         dt,
-        LOAD_SENSOR_SCALING,
-        Duration::from_millis(100),
+        config::LOAD_SENSOR_SCALING,
+        config::SCALE_POLLING_RATE_MS,
         system_scale,
+        config::SCALE_SAMPLES,
     )
     .unwrap();
 
@@ -127,7 +125,8 @@ fn main() -> Result<()> {
         let mut adc = Adc::new(
             temperature_probe,
             pressure_probe,
-            std::time::Duration::from_millis(10),
+            config::ADC_POLLING_RATE_MS,
+            config::ADC_SAMPLES,
             system_adc,
         );
         loop {
@@ -146,43 +145,43 @@ fn main() -> Result<()> {
     let system_gpio = system.clone();
     std::thread::spawn(move || {
         let mut boiler = PwmBuilder::new()
-            .with_interval(std::time::Duration::from_millis(2000))
+            .with_interval(config::BOILER_PWM_PERIOD)
             .with_pin(peripherals.pins.gpio12)
-            .with_poll_rate(std::time::Duration::from_millis(100))
             .build();
 
         let mut pump = PwmBuilder::new()
-            .with_interval(std::time::Duration::from_millis(500))
+            .with_interval(config::PUMP_PWM_PERIOD)
             .with_pin(peripherals.pins.gpio14)
-            .with_poll_rate(std::time::Duration::from_millis(100))
             .build();
 
-        let mut solenoid = Relay::new(
-            peripherals.pins.gpio13,
-            Some(true),
-            std::time::Duration::from_millis(100),
-        );
+        let mut solenoid = Relay::new(peripherals.pins.gpio13, Some(true));
 
         loop {
-            let mut next_tick: Vec<Duration> = Vec::new();
+            let mut next_tick: Vec<Duration> = vec![config::OUTPUT_POLL_INTERVAL];
             let requested_boiler_duty_cycle = system_gpio.get_boiler_duty_cycle();
 
             if boiler.get_duty_cycle() != requested_boiler_duty_cycle {
                 boiler.set_duty_cycle(requested_boiler_duty_cycle);
             }
-            next_tick.push(boiler.tick());
+            if let Some(duration) = boiler.tick() {
+                next_tick.push(duration);
+            }
 
             let requested_pump_duty_cycle = system_gpio.get_pump_duty_cycle();
             if pump.get_duty_cycle() != requested_pump_duty_cycle {
                 pump.set_duty_cycle(requested_pump_duty_cycle);
             }
-            next_tick.push(pump.tick());
+            if let Some(duration) = pump.tick() {
+                next_tick.push(duration);
+            }
 
             let requested_solenoid_state = system_gpio.get_solenoid_state();
             if solenoid.state != requested_solenoid_state {
                 solenoid.state = requested_solenoid_state;
             }
-            next_tick.push(solenoid.tick());
+            if let Some(duration) = solenoid.tick() {
+                next_tick.push(duration);
+            }
 
             FreeRtos::delay_ms(
                 next_tick
