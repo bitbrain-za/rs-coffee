@@ -1,5 +1,4 @@
 use anyhow::Result;
-use esp_idf_hal::adc;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::prelude::Peripherals;
 use gpio::adc::Adc;
@@ -16,7 +15,6 @@ use esp_idf_hal::adc::oneshot::*;
 use esp_idf_svc::hal::adc::oneshot::AdcDriver;
 use gpio::pwm::PwmBuilder;
 use gpio::relay::Relay;
-use sensors::boiler_temperature::BoilerTemperature;
 
 fn main() -> Result<()> {
     dotenv::dotenv().ok();

@@ -71,10 +71,6 @@ impl System {
         System { app_state }
     }
 
-    pub fn get_app_state(&self) -> Arc<Mutex<AppState>> {
-        self.app_state.clone()
-    }
-
     pub fn set_indicator(&self, state: IndicatorState) {
         self.app_state.lock().unwrap().indicator_state = state;
     }

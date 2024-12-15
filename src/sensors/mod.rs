@@ -1,2 +1,2 @@
-mod adc;
-pub mod boiler_temperature;
+pub mod pt100;
+pub mod traits;
