@@ -77,10 +77,12 @@ where
         }
     }
 
+    #[allow(dead_code)]
     pub fn turn_on(&mut self, on_time: Option<Duration>) {
         self.set_state(State::on(on_time));
     }
 
+    #[allow(dead_code)]
     pub fn turn_off(&mut self, off_time: Option<Duration>) {
         self.set_state(State::off(off_time));
     }

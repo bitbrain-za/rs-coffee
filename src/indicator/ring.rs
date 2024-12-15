@@ -10,6 +10,7 @@ use ws2812_esp32_rmt_driver::{Ws2812Esp32Rmt, RGB8 as Rgb};
 pub enum State {
     #[default]
     Off,
+    #[allow(dead_code)]
     Temperature {
         min: f32,
         max: f32,

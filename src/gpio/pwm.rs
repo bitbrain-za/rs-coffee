@@ -1,5 +1,5 @@
 use esp_idf_svc::hal::gpio::{Output, OutputPin, PinDriver};
-use std::time::{self, Duration, Instant};
+use std::time::{Duration, Instant};
 
 pub struct Pwm<'a, PD: OutputPin> {
     out: PinDriver<'a, PD, Output>,
@@ -49,6 +49,7 @@ where
         self.on_time_to_duty_cycle(None, None)
     }
 
+    #[allow(dead_code)]
     pub fn set_interval(&mut self, interval: Duration) {
         let current_dc = self.on_time_to_duty_cycle(None, None);
         self.interval = interval;
@@ -153,6 +154,7 @@ where
         self
     }
 
+    #[allow(dead_code)]
     pub fn invert(mut self, invert: bool) -> Self {
         self.invert = Some(invert);
         self

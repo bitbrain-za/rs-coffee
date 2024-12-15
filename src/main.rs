@@ -4,7 +4,6 @@ use esp_idf_svc::hal::prelude::Peripherals;
 use gpio::adc::Adc;
 use std::time::Duration;
 mod app_state;
-mod board;
 mod gpio;
 mod indicator;
 mod sensors;
@@ -12,6 +11,7 @@ use app_state::System;
 use esp_idf_hal::adc::attenuation::DB_11;
 use esp_idf_hal::adc::oneshot::config::AdcChannelConfig;
 use esp_idf_hal::adc::oneshot::*;
+use esp_idf_hal::gpio::{InterruptType, PinDriver, Pull};
 use esp_idf_svc::hal::adc::oneshot::AdcDriver;
 use gpio::pwm::PwmBuilder;
 use gpio::relay::Relay;
@@ -48,6 +48,44 @@ fn main() -> Result<()> {
     });
 
     system.set_indicator(indicator::ring::State::Busy);
+
+    let mut button_brew = PinDriver::input(peripherals.pins.gpio6)?;
+    let mut button_steam = PinDriver::input(peripherals.pins.gpio15)?;
+    let mut button_hot_water = PinDriver::input(peripherals.pins.gpio7)?;
+
+    button_brew.set_pull(Pull::Down)?;
+    button_brew.set_interrupt_type(InterruptType::PosEdge)?;
+    button_steam.set_pull(Pull::Down)?;
+    button_steam.set_interrupt_type(InterruptType::PosEdge)?;
+    button_hot_water.set_pull(Pull::Down)?;
+    button_hot_water.set_interrupt_type(InterruptType::PosEdge)?;
+
+    unsafe {
+        let system_brew_button = system.clone();
+        button_brew
+            .subscribe(move || {
+                system_brew_button.press_button(app_state::Buttons::Brew);
+            })
+            .unwrap();
+
+        let system_steam_button = system.clone();
+        button_steam
+            .subscribe(move || {
+                system_steam_button.press_button(app_state::Buttons::Steam);
+            })
+            .unwrap();
+
+        let system_hot_water_button = system.clone();
+        button_hot_water
+            .subscribe(move || {
+                system_hot_water_button.press_button(app_state::Buttons::HotWater);
+            })
+            .unwrap();
+    }
+
+    button_brew.enable_interrupt()?;
+    button_steam.enable_interrupt()?;
+    button_hot_water.enable_interrupt()?;
 
     let system_adc = system.clone();
     // ADC Thread
@@ -155,6 +193,16 @@ fn main() -> Result<()> {
         let pump_pressure = system.get_pump_pressure();
         println!("Boiler temperature: {}", boiler_temperature);
         println!("Pump pressure: {}", pump_pressure);
+
+        let presses = system.button_presses();
+        if !presses.is_empty() {
+            for button in presses {
+                println!("Button pressed: {}", button);
+            }
+            button_brew.enable_interrupt()?;
+            button_steam.enable_interrupt()?;
+            button_hot_water.enable_interrupt()?;
+        }
 
         FreeRtos::delay_ms(1000);
     }

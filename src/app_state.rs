@@ -1,7 +1,23 @@
-use crate::gpio::relay::State as RelayState;
+use crate::gpio::{button::Button, relay::State as RelayState};
 use crate::indicator::ring::State as IndicatorState;
 use std::default::Default;
 use std::sync::{Arc, Mutex};
+
+pub enum Buttons {
+    Brew,
+    Steam,
+    HotWater,
+}
+
+impl std::fmt::Display for Buttons {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Buttons::Brew => write!(f, "Brew"),
+            Buttons::Steam => write!(f, "Steam"),
+            Buttons::HotWater => write!(f, "Hot Water"),
+        }
+    }
+}
 
 #[derive(Default)]
 pub struct AppState {
@@ -9,6 +25,10 @@ pub struct AppState {
     pub boiler_state: BoilerState,
     pub solenoid_state: RelayState,
     pub pump_state: PumpState,
+
+    pub brew_button: Button,
+    pub steam_button: Button,
+    pub hot_water_button: Button,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -135,11 +155,49 @@ impl System {
         self.app_state.lock().unwrap().solenoid_state = RelayState::on(on_time);
     }
 
+    #[allow(dead_code)]
     pub fn solenoid_turn_off(&mut self, off_time: Option<std::time::Duration>) {
         self.app_state.lock().unwrap().solenoid_state = RelayState::off(off_time);
     }
 
     pub fn get_solenoid_state(&self) -> RelayState {
         self.app_state.lock().unwrap().solenoid_state
+    }
+
+    pub fn press_button(&self, button: Buttons) {
+        match button {
+            Buttons::Brew => self.app_state.lock().unwrap().brew_button.press(),
+            Buttons::Steam => self.app_state.lock().unwrap().steam_button.press(),
+            Buttons::HotWater => self.app_state.lock().unwrap().hot_water_button.press(),
+        }
+    }
+
+    pub fn was_button_pressed(&self, button: Buttons) -> bool {
+        match button {
+            Buttons::Brew => self.app_state.lock().unwrap().brew_button.was_pressed(),
+            Buttons::Steam => self.app_state.lock().unwrap().steam_button.was_pressed(),
+            Buttons::HotWater => self
+                .app_state
+                .lock()
+                .unwrap()
+                .hot_water_button
+                .was_pressed(),
+        }
+    }
+
+    pub fn button_presses(&self) -> Vec<Buttons> {
+        let mut buttons = Vec::new();
+
+        if self.was_button_pressed(Buttons::Brew) {
+            buttons.push(Buttons::Brew);
+        }
+        if self.was_button_pressed(Buttons::Steam) {
+            buttons.push(Buttons::Steam);
+        }
+        if self.was_button_pressed(Buttons::HotWater) {
+            buttons.push(Buttons::HotWater);
+        }
+
+        buttons
     }
 }
