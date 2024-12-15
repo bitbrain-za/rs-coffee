@@ -1,16 +1,19 @@
+use crate::config;
+
 pub struct Pt100 {
     calibration: f32,
 }
 
-impl Pt100 {
-    const C1: f32 = 18.0;
-
-    pub fn new(calibration: Option<f32>) -> Self {
-        let calibration = calibration.unwrap_or(2.209);
+impl Default for Pt100 {
+    fn default() -> Self {
         Pt100 {
-            calibration: calibration * Self::C1,
+            calibration: config::PT_100_CALIBRATION_FACTOR * Self::C1,
         }
     }
+}
+
+impl Pt100 {
+    const C1: f32 = 18.0;
 
     fn convert_voltage_to_resistance(&self, voltage: f32) -> f32 {
         (Self::C1 * 100.0 * voltage + self.calibration * 10.0) / (self.calibration - voltage)

@@ -1,5 +1,7 @@
 use crate::gpio::{button::Button, relay::State as RelayState};
 use crate::indicator::ring::State as IndicatorState;
+use crate::sensors::traits::PressureProbe;
+use crate::sensors::{pressure::SeeedWaterPressureSensor, pt100::Pt100, traits::TemperatureProbe};
 use std::default::Default;
 use std::sync::{Arc, Mutex};
 
@@ -31,6 +33,9 @@ pub struct AppState {
     pub brew_button: Button,
     pub steam_button: Button,
     pub hot_water_button: Button,
+
+    boiler_probe: Pt100,
+    pump_probe: SeeedWaterPressureSensor,
 }
 
 #[derive(Default, Copy, Clone)]
@@ -101,12 +106,26 @@ impl System {
         self.app_state.lock().unwrap().indicator_state
     }
 
-    pub fn set_boiler_temperature(&self, temperature: f32) {
-        self.app_state
+    pub fn set_boiler_temperature(&self, voltage: f32) {
+        let temperature = self
+            .app_state
             .lock()
             .unwrap()
-            .boiler_state
-            .set_temperature(temperature);
+            .boiler_probe
+            .convert_voltage_to_degrees(voltage);
+        match temperature {
+            Ok(temperature) => {
+                self.app_state
+                    .lock()
+                    .unwrap()
+                    .boiler_state
+                    .set_temperature(temperature);
+            }
+            Err(e) => {
+                log::error!("Failed to convert temperature: {}", e);
+                log::error!("Raw voltage: {}", voltage);
+            }
+        }
     }
 
     pub fn get_boiler_temperature(&self) -> f32 {
@@ -129,12 +148,26 @@ impl System {
         self.app_state.lock().unwrap().boiler_state.get_duty_cycle()
     }
 
-    pub fn set_pump_pressure(&self, pressure: f32) {
-        self.app_state
+    pub fn set_pump_pressure(&self, voltage: f32) {
+        let pressure = self
+            .app_state
             .lock()
             .unwrap()
-            .pump_state
-            .set_pressure(pressure);
+            .pump_probe
+            .convert_voltage_to_pressure(voltage);
+        match pressure {
+            Ok(pressure) => {
+                self.app_state
+                    .lock()
+                    .unwrap()
+                    .pump_state
+                    .set_pressure(pressure);
+            }
+            Err(e) => {
+                log::error!("Failed to convert temperature: {}", e);
+                log::error!("Raw voltage: {}", voltage);
+            }
+        };
     }
 
     pub fn get_pump_pressure(&self) -> f32 {

@@ -2,6 +2,7 @@ use anyhow::Result;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::prelude::Peripherals;
 use gpio::adc::Adc;
+use std::thread;
 use std::time::Duration;
 mod app_state;
 mod gpio;
@@ -27,12 +28,14 @@ fn main() -> Result<()> {
 
     let peripherals = Peripherals::take().unwrap();
 
+    log::info!("Starting up");
     let led_pin = peripherals.pins.gpio21;
     let channel = peripherals.rmt.channel0;
 
     let system = System::new();
     let system_indicator = system.clone();
 
+    log::info!("Setting up indicator");
     std::thread::spawn(move || {
         let mut ring =
             indicator::ring::Ring::new(channel, led_pin, 32, std::time::Duration::from_millis(100));
@@ -43,8 +46,7 @@ fn main() -> Result<()> {
             if ring.state != requested_indicator_state {
                 ring.set_state(requested_indicator_state);
             }
-            let next_tick = ring.tick();
-            FreeRtos::delay_ms(next_tick.as_millis() as u32);
+            thread::sleep(ring.tick());
         }
     });
 
@@ -84,6 +86,7 @@ fn main() -> Result<()> {
             .unwrap();
     }
 
+    log::info!("Setting up scale");
     let dt = peripherals.pins.gpio36;
     let sck = peripherals.pins.gpio35;
     let system_scale = system.clone();
@@ -103,6 +106,7 @@ fn main() -> Result<()> {
         FreeRtos::delay_ms(100);
     }
 
+    log::info!("Setting up buttons");
     button_brew.enable_interrupt()?;
     button_steam.enable_interrupt()?;
     button_hot_water.enable_interrupt()?;
@@ -232,6 +236,6 @@ fn main() -> Result<()> {
             button_hot_water.enable_interrupt()?;
         }
 
-        FreeRtos::delay_ms(1000);
+        thread::sleep(Duration::from_millis(1000));
     }
 }

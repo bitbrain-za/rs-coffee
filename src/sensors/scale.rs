@@ -84,7 +84,7 @@ where
             }
         }
 
-        self.next_poll = Instant::now() + self.poll_interval;
+        self.next_poll = Instant::now() + self.poll_interval - Duration::from_millis(1);
         self.poll_interval
     }
 }
