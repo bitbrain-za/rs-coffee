@@ -1,7 +1,16 @@
 use crate::config;
+use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
+use serde::{Deserialize, Serialize};
 
+#[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct Pt100 {
-    calibration: f32,
+    pub calibration: f32,
+}
+
+impl From<&Pt100> for Value {
+    fn from(params: &Pt100) -> Self {
+        Value::TemperatureProbe(*params)
+    }
 }
 
 impl Default for Pt100 {
@@ -12,8 +21,33 @@ impl Default for Pt100 {
     }
 }
 
+impl Storable for Pt100 {
+    fn load_or_default() -> Self {
+        let kvs = match KeyValueStore::new_blocking(std::time::Duration::from_millis(1000)) {
+            Ok(kvs) => kvs,
+            Err(e) => {
+                log::error!("Failed to create key value store: {:?}", e);
+                return Self::default();
+            }
+        };
+        match kvs.get(Key::TemperatureProbe) {
+            Value::TemperatureProbe(calibration) => calibration,
+            _ => Self::default(),
+        }
+    }
+
+    fn save(&self) -> Result<(), KvsError> {
+        let mut kvs = KeyValueStore::new_blocking(std::time::Duration::from_millis(1000))?;
+        kvs.set(self.into())
+    }
+}
+
 impl Pt100 {
     const C1: f32 = 18.0;
+
+    pub fn new() -> Self {
+        Pt100::load_or_default()
+    }
 
     fn convert_voltage_to_resistance(&self, voltage: f32) -> f32 {
         (Self::C1 * 100.0 * voltage + self.calibration * 10.0) / (self.calibration - voltage)

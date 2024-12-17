@@ -1,4 +1,5 @@
 use crate::app_state::System;
+use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
 use anyhow::Result;
 use esp_idf_svc::hal::{
     delay::Ets,
@@ -10,6 +11,38 @@ use std::time::{Duration, Instant};
 
 pub type LoadSensor<'a, SckPin, DtPin> =
     HX711<PinDriver<'a, SckPin, Output>, PinDriver<'a, DtPin, Input>, Ets>;
+
+#[derive(Debug, Default, Copy, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ScaleConfig {
+    pub offset: f32,
+}
+
+impl From<&ScaleConfig> for Value {
+    fn from(params: &ScaleConfig) -> Self {
+        Value::ScaleParameters(*params)
+    }
+}
+
+impl Storable for ScaleConfig {
+    fn load_or_default() -> ScaleConfig {
+        let kvs = match KeyValueStore::new_blocking(std::time::Duration::from_millis(1000)) {
+            Ok(kvs) => kvs,
+            Err(e) => {
+                log::error!("Failed to create key value store: {:?}", e);
+                return Self::default();
+            }
+        };
+        match kvs.get(Key::ScaleParameters) {
+            Value::ScaleParameters(calibration) => calibration,
+            _ => Self::default(),
+        }
+    }
+
+    fn save(&self) -> Result<(), KvsError> {
+        let mut kvs = KeyValueStore::new_blocking(std::time::Duration::from_millis(1000))?;
+        kvs.set(Value::from(self))
+    }
+}
 
 /// Loadcell struct
 pub struct Scale<'a, SckPin, DtPin>

@@ -1,11 +1,11 @@
-#[derive(Default)]
+#[derive(Debug, Default)]
 enum ButtonState {
     Pressed,
     #[default]
     Released,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub struct Button {
     state: ButtonState,
 }

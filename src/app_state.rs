@@ -1,7 +1,10 @@
 use crate::gpio::{button::Button, relay::State as RelayState};
 use crate::indicator::ring::State as IndicatorState;
+use crate::kv_store::Storable;
+use crate::models::boiler::BoilerModelParameters;
 use crate::sensors::traits::PressureProbe;
 use crate::sensors::{pressure::SeeedWaterPressureSensor, pt100::Pt100, traits::TemperatureProbe};
+use crate::system_status::SystemState;
 use std::default::Default;
 use std::sync::{Arc, Mutex};
 
@@ -21,8 +24,9 @@ impl std::fmt::Display for Buttons {
     }
 }
 
-#[derive(Default)]
+#[derive(Debug)]
 pub struct AppState {
+    pub system_state: SystemState,
     pub indicator_state: IndicatorState,
     pub boiler_state: BoilerState,
     pub solenoid_state: RelayState,
@@ -38,7 +42,46 @@ pub struct AppState {
     pump_probe: SeeedWaterPressureSensor,
 }
 
-#[derive(Default, Copy, Clone)]
+impl Default for AppState {
+    fn default() -> Self {
+        log::info!("Setting up NVS");
+
+        AppState {
+            system_state: SystemState::StartingUp("...".to_string()),
+            indicator_state: IndicatorState::default(),
+            boiler_state: BoilerState::default(),
+            solenoid_state: RelayState::default(),
+            pump_state: PumpState::default(),
+            weight: 0.0,
+            brew_button: Button::default(),
+            steam_button: Button::default(),
+            hot_water_button: Button::default(),
+            boiler_probe: Pt100::new(),
+            pump_probe: SeeedWaterPressureSensor::new(),
+        }
+    }
+}
+
+impl AppState {
+    pub fn update_boiler_probe(&mut self, probe: Pt100) -> Result<(), String> {
+        probe.save().map_err(|e| e.to_string())?;
+        self.boiler_probe = probe;
+        Ok(())
+    }
+
+    pub fn update_pump_probe(&mut self, probe: SeeedWaterPressureSensor) -> Result<(), String> {
+        probe.save().map_err(|e| e.to_string())?;
+        self.pump_probe = probe;
+        Ok(())
+    }
+
+    pub fn update_boiler_model(&mut self, model: BoilerModelParameters) -> Result<(), String> {
+        model.save().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone)]
 pub struct BoilerState {
     duty_cycle: f32,
     temperature: f32,
@@ -62,7 +105,7 @@ impl BoilerState {
     }
 }
 
-#[derive(Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone)]
 pub struct PumpState {
     duty_cycle: f32,
     pressure: f32,
@@ -94,6 +137,7 @@ pub struct System {
 impl System {
     pub fn new() -> Self {
         let app_state = AppState::default();
+        log::info!("App State: {:?}", app_state);
         let app_state = Arc::new(Mutex::new(app_state));
         System { app_state }
     }
@@ -242,5 +286,30 @@ impl System {
 
     pub fn get_weight(&self) -> f32 {
         self.app_state.lock().unwrap().weight
+    }
+
+    pub fn update_pt100(&self, probe: Pt100) -> Result<(), String> {
+        self.app_state.lock().unwrap().update_boiler_probe(probe)
+    }
+
+    pub fn update_pressure_probe(&self, probe: SeeedWaterPressureSensor) -> Result<(), String> {
+        self.app_state.lock().unwrap().update_pump_probe(probe)
+    }
+
+    pub fn heating_allowed(&self) -> bool {
+        match self.app_state.lock().unwrap().system_state {
+            SystemState::StartingUp(_) => false,
+            SystemState::Idle => true,
+            SystemState::Standby(_) => true,
+            SystemState::Heating(_) => true,
+            SystemState::Ready => true,
+            SystemState::PreInfusing => true,
+            SystemState::Brewing => true,
+            SystemState::Steaming => true,
+            SystemState::HotWater => true,
+            SystemState::Cleaning => true,
+            SystemState::Error(_) => false,
+            SystemState::Panic(_) => false,
+        }
     }
 }

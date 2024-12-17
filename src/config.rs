@@ -12,3 +12,10 @@ pub const PUMP_PWM_PERIOD: Duration = Duration::from_millis(100);
 pub const OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub const PT_100_CALIBRATION_FACTOR: f32 = 2.209;
+
+pub const LED_COUNT: usize = 32;
+pub const LED_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+
+pub const IDLE_TEMPERATURE: f32 = 60.0;
+
+pub const BOILER_POWER: u16 = 2000;
