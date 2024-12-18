@@ -1,3 +1,4 @@
+use crate::board::{self, Board};
 use crate::gpio::relay::State as RelayState;
 use crate::kv_store::Storable;
 use crate::models::boiler::BoilerModelParameters;
@@ -23,34 +24,32 @@ impl std::fmt::Display for Buttons {
     }
 }
 
-#[derive(Debug)]
-pub struct AppState {
+pub struct AppState<'a> {
     pub system_state: SystemState,
     pub boiler_state: BoilerState,
     pub solenoid_state: RelayState,
     pub pump_state: PumpState,
-
-    pub weight: f32,
+    pub board: Board<'a>,
 
     boiler_probe: Pt100,
     pump_probe: SeeedWaterPressureSensor,
 }
 
-impl Default for AppState {
+impl<'a> Default for AppState<'a> {
     fn default() -> Self {
         AppState {
             system_state: SystemState::StartingUp("...".to_string()),
             boiler_state: BoilerState::default(),
             solenoid_state: RelayState::default(),
             pump_state: PumpState::default(),
-            weight: 0.0,
             boiler_probe: Pt100::new(),
             pump_probe: SeeedWaterPressureSensor::new(),
+            board: Board::new(),
         }
     }
 }
 
-impl AppState {
+impl<'a> AppState<'a> {
     pub fn update_boiler_probe(&mut self, probe: Pt100) -> Result<(), String> {
         probe.save().map_err(|e| e.to_string())?;
         self.boiler_probe = probe;
@@ -118,14 +117,13 @@ impl PumpState {
 }
 
 #[derive(Default, Clone)]
-pub struct System {
-    app_state: Arc<Mutex<AppState>>,
+pub struct System<'a> {
+    app_state: Arc<Mutex<AppState<'a>>>,
 }
 
-impl System {
+impl<'a> System<'a> {
     pub fn new() -> Self {
         let app_state = AppState::default();
-        log::info!("App State: {:?}", app_state);
         let app_state = Arc::new(Mutex::new(app_state));
         System { app_state }
     }
@@ -221,14 +219,6 @@ impl System {
 
     pub fn get_solenoid_state(&self) -> RelayState {
         self.app_state.lock().unwrap().solenoid_state
-    }
-
-    pub fn set_weight(&self, weight: f32) {
-        self.app_state.lock().unwrap().weight = weight;
-    }
-
-    pub fn get_weight(&self) -> f32 {
-        self.app_state.lock().unwrap().weight
     }
 
     pub fn update_pt100(&self, probe: Pt100) -> Result<(), String> {

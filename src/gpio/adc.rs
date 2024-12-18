@@ -1,4 +1,3 @@
-use crate::app_state::System;
 use core::borrow::Borrow;
 use esp_idf_svc::hal::{
     adc::oneshot::{AdcChannelDriver, AdcDriver},
@@ -22,10 +21,10 @@ pub struct Adc<
     pressure_probe: AdcChannelDriver<'a, P, N>,
     poll_interval: Duration,
     next_poll: Instant,
-    system: System,
     raw_to_vin_factor: f32,
     samples: Vec<(u16, u16)>,
     samples_to_average: usize,
+    last_reading: (f32, f32),
 }
 
 impl<'a, T, P, M, N> Adc<'a, T, P, M, N>
@@ -40,7 +39,6 @@ where
         adc2: AdcChannelDriver<'a, P, N>,
         poll_interval: Duration,
         samples: usize,
-        system: System,
     ) -> Self {
         // [ ] these are probably wrong
         const ADC_TOP: f32 = 4096.0;
@@ -52,10 +50,10 @@ where
             pressure_probe: adc2,
             poll_interval,
             next_poll: Instant::now(),
-            system,
             raw_to_vin_factor: vin_div_top,
             samples: Vec::new(),
             samples_to_average: samples,
+            last_reading: (0.0, 0.0),
         }
     }
 
@@ -71,7 +69,7 @@ where
         }
     }
 
-    pub fn read(&mut self) {
+    pub fn read(&mut self) -> Option<(f32, f32)> {
         let raw_temperature = self
             .temperature_probe
             .read()
@@ -94,8 +92,9 @@ where
 
             self.samples.clear();
 
-            self.system.set_boiler_temperature(average_boiler_voltage);
-            self.system.set_pump_pressure(average_pressure_voltage);
+            Some((average_boiler_voltage, average_pressure_voltage))
+        } else {
+            None
         }
     }
 
@@ -103,7 +102,9 @@ where
         if Instant::now() < self.next_poll {
             return self.next_poll - Instant::now();
         }
-        self.read();
+        if let Some((boiler, pressure)) = self.read() {
+            self.last_reading = (boiler, pressure);
+        }
         self.next_poll = Instant::now() + self.poll_interval - Duration::from_millis(1);
         self.poll_interval
     }

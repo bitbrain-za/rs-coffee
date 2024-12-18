@@ -1,4 +1,3 @@
-use crate::app_state::System;
 use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
 use anyhow::Result;
 use esp_idf_svc::hal::{
@@ -44,7 +43,6 @@ impl Storable for ScaleConfig {
     }
 }
 
-/// Loadcell struct
 pub struct Scale<'a, SckPin, DtPin>
 where
     DtPin: Peripheral<P = DtPin> + Pin + InputPin,
@@ -53,9 +51,9 @@ where
     load_sensor: LoadSensor<'a, SckPin, DtPin>,
     poll_interval: Duration,
     next_poll: Instant,
-    system: System,
     samples: Vec<f32>,
     samples_to_average: usize,
+    last_reading: f32,
 }
 
 impl<'a, SckPin, DtPin> Scale<'a, SckPin, DtPin>
@@ -68,7 +66,6 @@ where
         data_pin: DtPin,
         scaling: f32,
         poll_interval: Duration,
-        system: System,
         samples: usize,
     ) -> Result<Self> {
         let dt = PinDriver::input(data_pin)?;
@@ -81,9 +78,9 @@ where
             load_sensor,
             poll_interval,
             next_poll: Instant::now(),
-            system,
             samples: Vec::new(),
             samples_to_average: samples,
+            last_reading: 0.0,
         })
     }
 
@@ -95,26 +92,37 @@ where
         self.load_sensor.tare(times);
     }
 
-    pub fn poll(&mut self) -> Duration {
-        if Instant::now() < self.next_poll {
-            return self.next_poll - Instant::now();
-        }
+    pub fn read(&mut self) -> Option<f32> {
         match self.load_sensor.read_scaled() {
             Ok(reading) => {
                 if self.samples_to_average > 0 {
                     self.samples.push(reading);
                     if self.samples.len() > self.samples_to_average {
                         let reading = self.samples.iter().sum::<f32>() / self.samples.len() as f32;
-                        self.system.set_weight(reading);
                         self.samples.clear();
+                        Some(reading)
+                    } else {
+                        None
                     }
                 } else {
-                    self.system.set_weight(reading);
+                    Some(reading)
                 }
             }
             Err(e) => {
                 log::error!("Failed to read from load sensor: {:?}", e);
+                // [ ] add an error state
+                None
             }
+        }
+    }
+
+    pub fn poll(&mut self) -> Duration {
+        if Instant::now() < self.next_poll {
+            return self.next_poll - Instant::now();
+        }
+
+        if let Some(reading) = self.read() {
+            self.last_reading = reading;
         }
 
         self.next_poll = Instant::now() + self.poll_interval - Duration::from_millis(1);
