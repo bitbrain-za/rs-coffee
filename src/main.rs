@@ -1,3 +1,5 @@
+// [ ] Remove this later, just silence warnings while we're doing large scale writing
+#![allow(dead_code)]
 mod app_state;
 mod config;
 mod gpio;
@@ -14,7 +16,6 @@ use esp_idf_hal::adc::{
 };
 use esp_idf_hal::gpio::{InterruptType, PinDriver, Pull};
 use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
-use esp_idf_svc::nvs::*;
 use gpio::{adc::Adc, pwm::PwmBuilder, relay::Relay};
 use sensors::scale::Scale;
 use std::thread;
@@ -240,112 +241,4 @@ fn main() -> Result<()> {
         thread::sleep(Duration::from_millis(1000));
     }
     /***********************************************/
-}
-
-use serde::{Deserialize, Serialize};
-#[derive(Serialize, Deserialize, Debug)]
-struct StructToBeStored<'a> {
-    some_bytes: &'a [u8],
-    a_str: &'a str,
-    a_number: i16,
-}
-
-fn test_nvs() -> anyhow::Result<()> {
-    use postcard::{from_bytes, to_vec};
-    let nvs_default_partition: EspNvsPartition<NvsDefault> = EspDefaultNvsPartition::take()?;
-
-    let test_namespace = "test_ns";
-    let mut nvs = match EspNvs::new(nvs_default_partition, test_namespace, true) {
-        Ok(nvs) => {
-            log::info!("Got namespace {:?} from default partition", test_namespace);
-            nvs
-        }
-        Err(e) => panic!("Could't get namespace {:?}", e),
-    };
-
-    let key_raw_u8 = "test_raw_u8";
-    {
-        let key_raw_u8_data: &[u8] = &[42];
-
-        match nvs.set_raw(key_raw_u8, key_raw_u8_data) {
-            Ok(_) => log::info!("Key updated"),
-            // You can find the meaning of the error codes in the output of the error branch in:
-            // https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/error-codes.html
-            Err(e) => log::info!("Key not updated {:?}", e),
-        };
-    }
-
-    {
-        let key_raw_u8_data: &mut [u8] = &mut [u8::MAX];
-
-        match nvs.get_raw(key_raw_u8, key_raw_u8_data) {
-            Ok(v) => match v {
-                Some(vv) => log::info!("{:?} = {:?}", key_raw_u8, vv),
-                None => todo!(),
-            },
-            Err(e) => log::info!("Couldn't get key {} because{:?}", key_raw_u8, e),
-        };
-    }
-
-    let key_raw_str: &str = "test_raw_str";
-    {
-        let key_raw_str_data = "Hello from the NVS (I'm raw)!";
-
-        match nvs.set_raw(
-            key_raw_str,
-            &to_vec::<&str, 100>(&key_raw_str_data).unwrap(),
-        ) {
-            Ok(_) => log::info!("Key {} updated", key_raw_str),
-            Err(e) => log::info!("Key {} not updated {:?}", key_raw_str, e),
-        };
-    }
-
-    {
-        let key_raw_str_data: &mut [u8] = &mut [0; 100];
-
-        match nvs.get_raw(key_raw_str, key_raw_str_data) {
-            Ok(v) => {
-                if let Some(the_str) = v {
-                    log::info!("{:?} = {:?}", key_raw_str, from_bytes::<&str>(the_str));
-                }
-            }
-            Err(e) => log::info!("Couldn't get key {} because {:?}", key_raw_str, e),
-        };
-    }
-
-    let key_raw_struct: &str = "test_raw_struct";
-    {
-        let key_raw_struct_data = StructToBeStored {
-            some_bytes: &[1, 2, 3, 4],
-            a_str: "I'm a str inside a struct!",
-            a_number: 42,
-        };
-
-        match nvs.set_raw(
-            key_raw_struct,
-            &to_vec::<StructToBeStored, 100>(&key_raw_struct_data).unwrap(),
-        ) {
-            Ok(_) => log::info!("Key {} updated", key_raw_struct),
-            Err(e) => log::info!("key {} not updated {:?}", key_raw_struct, e),
-        };
-    }
-
-    {
-        let key_raw_struct_data: &mut [u8] = &mut [0; 100];
-
-        match nvs.get_raw(key_raw_struct, key_raw_struct_data) {
-            Ok(v) => {
-                if let Some(the_struct) = v {
-                    log::info!(
-                        "{:?} = {:?}",
-                        key_raw_struct,
-                        from_bytes::<StructToBeStored>(the_struct)
-                    )
-                }
-            }
-            Err(e) => log::info!("Couldn't get key {} because {:?}", key_raw_struct, e),
-        };
-    }
-
-    Ok(())
 }

@@ -152,10 +152,10 @@ impl KeyValueStore {
 
     pub fn set(&mut self, value: Value) -> Result<(), Error> {
         let key = Key::from(&value).to_string();
-        let value = &to_vec::<Value, MAX_VALUE_SIZE>(&value).map_err(|e| Error::Serialize(e))?;
+        let value = &to_vec::<Value, MAX_VALUE_SIZE>(&value).map_err(Error::Serialize)?;
         self.storage
             .set_raw(&key, value)
-            .map_err(|e| Error::EspSys(e))
+            .map_err(Error::EspSys)
             .map(|_| ())
     }
 }
