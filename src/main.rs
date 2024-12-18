@@ -9,7 +9,7 @@ mod indicator;
 mod kv_store;
 mod models;
 mod sensors;
-mod system_status;
+mod state_machines;
 use anyhow::Result;
 use app_state::System;
 use std::thread;
