@@ -1,5 +1,4 @@
-use crate::gpio::{button::Button, relay::State as RelayState};
-use crate::indicator::ring::State as IndicatorState;
+use crate::gpio::relay::State as RelayState;
 use crate::kv_store::Storable;
 use crate::models::boiler::BoilerModelParameters;
 use crate::sensors::traits::PressureProbe;
@@ -27,16 +26,11 @@ impl std::fmt::Display for Buttons {
 #[derive(Debug)]
 pub struct AppState {
     pub system_state: SystemState,
-    pub indicator_state: IndicatorState,
     pub boiler_state: BoilerState,
     pub solenoid_state: RelayState,
     pub pump_state: PumpState,
 
     pub weight: f32,
-
-    pub brew_button: Button,
-    pub steam_button: Button,
-    pub hot_water_button: Button,
 
     boiler_probe: Pt100,
     pump_probe: SeeedWaterPressureSensor,
@@ -44,18 +38,12 @@ pub struct AppState {
 
 impl Default for AppState {
     fn default() -> Self {
-        log::info!("Setting up NVS");
-
         AppState {
             system_state: SystemState::StartingUp("...".to_string()),
-            indicator_state: IndicatorState::default(),
             boiler_state: BoilerState::default(),
             solenoid_state: RelayState::default(),
             pump_state: PumpState::default(),
             weight: 0.0,
-            brew_button: Button::default(),
-            steam_button: Button::default(),
-            hot_water_button: Button::default(),
             boiler_probe: Pt100::new(),
             pump_probe: SeeedWaterPressureSensor::new(),
         }
@@ -140,14 +128,6 @@ impl System {
         log::info!("App State: {:?}", app_state);
         let app_state = Arc::new(Mutex::new(app_state));
         System { app_state }
-    }
-
-    pub fn set_indicator(&self, state: IndicatorState) {
-        self.app_state.lock().unwrap().indicator_state = state;
-    }
-
-    pub fn get_indicator(&self) -> IndicatorState {
-        self.app_state.lock().unwrap().indicator_state
     }
 
     pub fn set_boiler_temperature(&self, voltage: f32) {
@@ -241,43 +221,6 @@ impl System {
 
     pub fn get_solenoid_state(&self) -> RelayState {
         self.app_state.lock().unwrap().solenoid_state
-    }
-
-    pub fn press_button(&self, button: Buttons) {
-        match button {
-            Buttons::Brew => self.app_state.lock().unwrap().brew_button.press(),
-            Buttons::Steam => self.app_state.lock().unwrap().steam_button.press(),
-            Buttons::HotWater => self.app_state.lock().unwrap().hot_water_button.press(),
-        }
-    }
-
-    pub fn was_button_pressed(&self, button: Buttons) -> bool {
-        match button {
-            Buttons::Brew => self.app_state.lock().unwrap().brew_button.was_pressed(),
-            Buttons::Steam => self.app_state.lock().unwrap().steam_button.was_pressed(),
-            Buttons::HotWater => self
-                .app_state
-                .lock()
-                .unwrap()
-                .hot_water_button
-                .was_pressed(),
-        }
-    }
-
-    pub fn button_presses(&self) -> Vec<Buttons> {
-        let mut buttons = Vec::new();
-
-        if self.was_button_pressed(Buttons::Brew) {
-            buttons.push(Buttons::Brew);
-        }
-        if self.was_button_pressed(Buttons::Steam) {
-            buttons.push(Buttons::Steam);
-        }
-        if self.was_button_pressed(Buttons::HotWater) {
-            buttons.push(Buttons::HotWater);
-        }
-
-        buttons
     }
 
     pub fn set_weight(&self, weight: f32) {

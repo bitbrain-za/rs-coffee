@@ -1,6 +1,8 @@
+// [ ] Go through all the "expects" and change them to put the system into an error/panic state
 // [ ] Remove this later, just silence warnings while we're doing large scale writing
 #![allow(dead_code)]
 mod app_state;
+mod board;
 mod config;
 mod gpio;
 mod indicator;
@@ -10,6 +12,7 @@ mod sensors;
 mod system_status;
 use anyhow::Result;
 use app_state::System;
+use board::Board;
 use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
@@ -26,178 +29,118 @@ fn main() -> Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
     log::info!("Starting up");
 
-    let peripherals = Peripherals::take().unwrap();
+    // let peripherals = Peripherals::take().unwrap();
     let system = System::new();
 
-    log::info!("Setting up indicator");
-    let led_pin = peripherals.pins.gpio21;
-    let channel = peripherals.rmt.channel0;
-    let system_indicator = system.clone();
-    std::thread::spawn(move || {
-        let mut ring = indicator::ring::Ring::new(
-            channel,
-            led_pin,
-            config::LED_COUNT,
-            config::LED_REFRESH_INTERVAL,
-        );
-        ring.set_state(indicator::ring::State::Busy);
+    let mut board = Board::new();
+    board.indicators.set_state(indicator::ring::State::Busy);
 
-        loop {
-            let requested_indicator_state = system_indicator.get_indicator();
-            if ring.state != requested_indicator_state {
-                ring.set_state(requested_indicator_state);
-            }
-            thread::sleep(ring.tick());
-        }
-    });
+    // log::info!("Setting up scale");
+    // let dt = peripherals.pins.gpio36;
+    // let sck = peripherals.pins.gpio35;
+    // let system_scale = system.clone();
+    // let mut scale = Scale::new(
+    //     sck,
+    //     dt,
+    //     config::LOAD_SENSOR_SCALING,
+    //     config::SCALE_POLLING_RATE_MS,
+    //     system_scale,
+    //     config::SCALE_SAMPLES,
+    // )
+    // .unwrap();
 
-    system.set_indicator(indicator::ring::State::Busy);
+    // scale.tare(32);
 
-    let mut button_brew = PinDriver::input(peripherals.pins.gpio6)?;
-    let mut button_steam = PinDriver::input(peripherals.pins.gpio15)?;
-    let mut button_hot_water = PinDriver::input(peripherals.pins.gpio7)?;
+    // while !scale.is_ready() {
+    //     FreeRtos::delay_ms(100);
+    // }
 
-    button_brew.set_pull(Pull::Down)?;
-    button_brew.set_interrupt_type(InterruptType::PosEdge)?;
-    button_steam.set_pull(Pull::Down)?;
-    button_steam.set_interrupt_type(InterruptType::PosEdge)?;
-    button_hot_water.set_pull(Pull::Down)?;
-    button_hot_water.set_interrupt_type(InterruptType::PosEdge)?;
+    // let system_adc = system.clone();
+    // // Sensor Thread
+    // std::thread::spawn(move || {
+    //     let adc = AdcDriver::new(peripherals.adc1).expect("Failed to create ADC driver");
+    //     let config = AdcChannelConfig {
+    //         attenuation: attenuation::DB_11,
+    //         calibration: true,
+    //         ..Default::default()
+    //     };
 
-    unsafe {
-        let system_brew_button = system.clone();
-        button_brew
-            .subscribe(move || {
-                system_brew_button.press_button(app_state::Buttons::Brew);
-            })
-            .unwrap();
+    //     let temperature_probe = AdcChannelDriver::new(&adc, peripherals.pins.gpio4, &config)
+    //         .expect("Failed to create ADC channel temperature");
+    //     let pressure_probe = AdcChannelDriver::new(&adc, peripherals.pins.gpio5, &config)
+    //         .expect("Failed to create ADC channel pressure");
 
-        let system_steam_button = system.clone();
-        button_steam
-            .subscribe(move || {
-                system_steam_button.press_button(app_state::Buttons::Steam);
-            })
-            .unwrap();
+    //     let mut adc = Adc::new(
+    //         temperature_probe,
+    //         pressure_probe,
+    //         config::ADC_POLLING_RATE_MS,
+    //         config::ADC_SAMPLES,
+    //         system_adc,
+    //     );
+    //     loop {
+    //         let next_tick: Vec<Duration> = vec![adc.poll(), scale.poll()];
+    //         FreeRtos::delay_ms(
+    //             next_tick
+    //                 .iter()
+    //                 .min()
+    //                 .unwrap_or(&Duration::from_millis(100))
+    //                 .as_millis() as u32,
+    //         );
+    //     }
+    // });
 
-        let system_hot_water_button = system.clone();
-        button_hot_water
-            .subscribe(move || {
-                system_hot_water_button.press_button(app_state::Buttons::HotWater);
-            })
-            .unwrap();
-    }
+    // // GPIO thread
+    // log::info!("Setting up Outputs");
+    // let system_gpio = system.clone();
+    // std::thread::spawn(move || {
+    //     let mut boiler = PwmBuilder::new()
+    //         .with_interval(config::BOILER_PWM_PERIOD)
+    //         .with_pin(peripherals.pins.gpio12)
+    //         .build();
 
-    log::info!("Setting up scale");
-    let dt = peripherals.pins.gpio36;
-    let sck = peripherals.pins.gpio35;
-    let system_scale = system.clone();
-    let mut scale = Scale::new(
-        sck,
-        dt,
-        config::LOAD_SENSOR_SCALING,
-        config::SCALE_POLLING_RATE_MS,
-        system_scale,
-        config::SCALE_SAMPLES,
-    )
-    .unwrap();
+    //     let mut pump = PwmBuilder::new()
+    //         .with_interval(config::PUMP_PWM_PERIOD)
+    //         .with_pin(peripherals.pins.gpio14)
+    //         .build();
 
-    scale.tare(32);
+    //     let mut solenoid = Relay::new(peripherals.pins.gpio13, Some(true));
 
-    while !scale.is_ready() {
-        FreeRtos::delay_ms(100);
-    }
+    //     loop {
+    //         let mut next_tick: Vec<Duration> = vec![config::OUTPUT_POLL_INTERVAL];
+    //         let requested_boiler_duty_cycle = system_gpio.get_boiler_duty_cycle();
 
-    log::info!("Setting up buttons");
-    button_brew.enable_interrupt()?;
-    button_steam.enable_interrupt()?;
-    button_hot_water.enable_interrupt()?;
+    //         if boiler.get_duty_cycle() != requested_boiler_duty_cycle {
+    //             boiler.set_duty_cycle(requested_boiler_duty_cycle);
+    //         }
+    //         if let Some(duration) = boiler.tick() {
+    //             next_tick.push(duration);
+    //         }
 
-    let system_adc = system.clone();
-    // Sensor Thread
-    std::thread::spawn(move || {
-        let adc = AdcDriver::new(peripherals.adc1).expect("Failed to create ADC driver");
-        let config = AdcChannelConfig {
-            attenuation: attenuation::DB_11,
-            calibration: true,
-            ..Default::default()
-        };
+    //         let requested_pump_duty_cycle = system_gpio.get_pump_duty_cycle();
+    //         if pump.get_duty_cycle() != requested_pump_duty_cycle {
+    //             pump.set_duty_cycle(requested_pump_duty_cycle);
+    //         }
+    //         if let Some(duration) = pump.tick() {
+    //             next_tick.push(duration);
+    //         }
 
-        let temperature_probe = AdcChannelDriver::new(&adc, peripherals.pins.gpio4, &config)
-            .expect("Failed to create ADC channel temperature");
-        let pressure_probe = AdcChannelDriver::new(&adc, peripherals.pins.gpio5, &config)
-            .expect("Failed to create ADC channel pressure");
+    //         let requested_solenoid_state = system_gpio.get_solenoid_state();
+    //         if solenoid.state != requested_solenoid_state {
+    //             solenoid.state = requested_solenoid_state;
+    //         }
+    //         if let Some(duration) = solenoid.tick() {
+    //             next_tick.push(duration);
+    //         }
 
-        let mut adc = Adc::new(
-            temperature_probe,
-            pressure_probe,
-            config::ADC_POLLING_RATE_MS,
-            config::ADC_SAMPLES,
-            system_adc,
-        );
-        loop {
-            let next_tick: Vec<Duration> = vec![adc.poll(), scale.poll()];
-            FreeRtos::delay_ms(
-                next_tick
-                    .iter()
-                    .min()
-                    .unwrap_or(&Duration::from_millis(100))
-                    .as_millis() as u32,
-            );
-        }
-    });
-
-    // GPIO thread
-    log::info!("Setting up Outputs");
-    let system_gpio = system.clone();
-    std::thread::spawn(move || {
-        let mut boiler = PwmBuilder::new()
-            .with_interval(config::BOILER_PWM_PERIOD)
-            .with_pin(peripherals.pins.gpio12)
-            .build();
-
-        let mut pump = PwmBuilder::new()
-            .with_interval(config::PUMP_PWM_PERIOD)
-            .with_pin(peripherals.pins.gpio14)
-            .build();
-
-        let mut solenoid = Relay::new(peripherals.pins.gpio13, Some(true));
-
-        loop {
-            let mut next_tick: Vec<Duration> = vec![config::OUTPUT_POLL_INTERVAL];
-            let requested_boiler_duty_cycle = system_gpio.get_boiler_duty_cycle();
-
-            if boiler.get_duty_cycle() != requested_boiler_duty_cycle {
-                boiler.set_duty_cycle(requested_boiler_duty_cycle);
-            }
-            if let Some(duration) = boiler.tick() {
-                next_tick.push(duration);
-            }
-
-            let requested_pump_duty_cycle = system_gpio.get_pump_duty_cycle();
-            if pump.get_duty_cycle() != requested_pump_duty_cycle {
-                pump.set_duty_cycle(requested_pump_duty_cycle);
-            }
-            if let Some(duration) = pump.tick() {
-                next_tick.push(duration);
-            }
-
-            let requested_solenoid_state = system_gpio.get_solenoid_state();
-            if solenoid.state != requested_solenoid_state {
-                solenoid.state = requested_solenoid_state;
-            }
-            if let Some(duration) = solenoid.tick() {
-                next_tick.push(duration);
-            }
-
-            FreeRtos::delay_ms(
-                next_tick
-                    .iter()
-                    .min()
-                    .unwrap_or(&Duration::from_millis(100))
-                    .as_millis() as u32,
-            );
-        }
-    });
+    //         FreeRtos::delay_ms(
+    //             next_tick
+    //                 .iter()
+    //                 .min()
+    //                 .unwrap_or(&Duration::from_millis(100))
+    //                 .as_millis() as u32,
+    //         );
+    //     }
+    // });
 
     log::info!("Setup complete, starting main loop");
     /**************** TEST SECTION  ****************/
@@ -209,7 +152,7 @@ fn main() -> Result<()> {
     let mut start = std::time::Instant::now() - std::time::Duration::from_millis(200);
     loop {
         if start.elapsed() > std::time::Duration::from_millis(200) {
-            system.set_indicator(indicator::ring::State::Guage {
+            board.indicators.set_state(indicator::ring::State::Guage {
                 min: 0.0,
                 max: 100.0,
                 level,
@@ -228,14 +171,11 @@ fn main() -> Result<()> {
         println!("Pump pressure: {}", pump_pressure);
         println!("Weight: {}", system.get_weight());
 
-        let presses = system.button_presses();
+        let presses = board.buttons.button_presses();
         if !presses.is_empty() {
             for button in presses {
                 println!("Button pressed: {}", button);
             }
-            button_brew.enable_interrupt()?;
-            button_steam.enable_interrupt()?;
-            button_hot_water.enable_interrupt()?;
         }
 
         thread::sleep(Duration::from_millis(1000));
