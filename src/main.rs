@@ -12,14 +12,6 @@ mod sensors;
 mod system_status;
 use anyhow::Result;
 use app_state::System;
-use board::Board;
-use esp_idf_hal::adc::{
-    attenuation,
-    oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
-};
-use esp_idf_hal::gpio::{InterruptType, PinDriver, Pull};
-use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
-use gpio::{adc::Adc, pwm::PwmBuilder, relay::Relay};
 use std::thread;
 use std::time::Duration;
 
@@ -28,67 +20,14 @@ fn main() -> Result<()> {
     esp_idf_svc::log::EspLogger::initialize_default();
     log::info!("Starting up");
 
-    let mut board = Board::new();
-    board.indicators.set_state(indicator::ring::State::Busy);
-
-    // // GPIO thread
-    // log::info!("Setting up Outputs");
-    // let system_gpio = system.clone();
-    // std::thread::spawn(move || {
-    //     let mut boiler = PwmBuilder::new()
-    //         .with_interval(config::BOILER_PWM_PERIOD)
-    //         .with_pin(peripherals.pins.gpio12)
-    //         .build();
-
-    //     let mut pump = PwmBuilder::new()
-    //         .with_interval(config::PUMP_PWM_PERIOD)
-    //         .with_pin(peripherals.pins.gpio14)
-    //         .build();
-
-    //     let mut solenoid = Relay::new(peripherals.pins.gpio13, Some(true));
-
-    //     loop {
-    //         let mut next_tick: Vec<Duration> = vec![config::OUTPUT_POLL_INTERVAL];
-    //         let requested_boiler_duty_cycle = system_gpio.get_boiler_duty_cycle();
-
-    //         if boiler.get_duty_cycle() != requested_boiler_duty_cycle {
-    //             boiler.set_duty_cycle(requested_boiler_duty_cycle);
-    //         }
-    //         if let Some(duration) = boiler.tick() {
-    //             next_tick.push(duration);
-    //         }
-
-    //         let requested_pump_duty_cycle = system_gpio.get_pump_duty_cycle();
-    //         if pump.get_duty_cycle() != requested_pump_duty_cycle {
-    //             pump.set_duty_cycle(requested_pump_duty_cycle);
-    //         }
-    //         if let Some(duration) = pump.tick() {
-    //             next_tick.push(duration);
-    //         }
-
-    //         let requested_solenoid_state = system_gpio.get_solenoid_state();
-    //         if solenoid.state != requested_solenoid_state {
-    //             solenoid.state = requested_solenoid_state;
-    //         }
-    //         if let Some(duration) = solenoid.tick() {
-    //             next_tick.push(duration);
-    //         }
-
-    //         FreeRtos::delay_ms(
-    //             next_tick
-    //                 .iter()
-    //                 .min()
-    //                 .unwrap_or(&Duration::from_millis(100))
-    //                 .as_millis() as u32,
-    //         );
-    //     }
-    // });
+    let system = System::new();
+    let mut board = system.board.lock().unwrap();
 
     log::info!("Setup complete, starting main loop");
     /**************** TEST SECTION  ****************/
-    // system.set_boiler_duty_cycle(0.5);
-    // system.set_pump_duty_cycle(1.0);
-    // system.solenoid_turn_on(Some(Duration::from_secs(5)));
+    *board.outputs.boiler_duty_cycle.lock().unwrap() = 0.5;
+    *board.outputs.pump_duty_cycle.lock().unwrap() = 0.2;
+    *board.outputs.solenoid.lock().unwrap() = gpio::relay::State::on(Some(Duration::from_secs(5)));
 
     let mut level = 0.0;
     let mut start = std::time::Instant::now() - std::time::Duration::from_millis(200);

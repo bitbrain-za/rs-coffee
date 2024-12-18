@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 pub const LOAD_SENSOR_SCALING: f32 = 4.761905;
-pub const SCALE_POLLING_RATE_MS: Duration = Duration::from_millis(100);
+pub const SCALE_POLLING_RATE_MS: Duration = Duration::from_millis(10 * 10);
 pub const SCALE_SAMPLES: usize = 5;
 
 pub const ADC_POLLING_RATE_MS: Duration = Duration::from_millis(10);

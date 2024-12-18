@@ -1,20 +1,15 @@
-//! Board module
-//!
-//! This isn't the actual HW (or should it be?)
-//! But essentially, the central point for various threads to set and read HW components
-
 use crate::config;
-use crate::gpio::{button::Button, relay::State as RelayState};
+use crate::gpio::{
+    adc::Adc, button::Button, pwm::PwmBuilder, relay::Relay, relay::State as RelayState,
+};
 use crate::indicator::ring::{Ring, State as IndicatorState};
 use crate::sensors::scale::Scale as LoadCell;
-use crate::sensors::{pressure::SeeedWaterPressureSensor, pt100::Pt100, traits::TemperatureProbe};
+use crate::sensors::{pressure::SeeedWaterPressureSensor, pt100::Pt100};
 use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
 };
-use esp_idf_hal::gpio::{InterruptType, PinDriver, Pull};
-use esp_idf_svc::hal::gpio::{Gpio15, Gpio35, Gpio36, Gpio6, Gpio7, InputPin, OutputPin, Pin};
-use esp_idf_svc::hal::peripheral::Peripheral;
+use esp_idf_svc::hal::gpio::{Gpio15, Gpio6, Gpio7, InputPin, OutputPin};
 use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -158,14 +153,23 @@ impl Sensors<'_> {
     }
 }
 
+pub struct Outputs {
+    pub boiler_duty_cycle: Arc<Mutex<f32>>,
+    pub pump_duty_cycle: Arc<Mutex<f32>>,
+    pub solenoid: Arc<Mutex<RelayState>>,
+    handle: thread::JoinHandle<()>,
+    kill_switch: Arc<Mutex<bool>>,
+}
+
 pub struct Board<'a> {
     pub indicators: Indicators,
     pub sensors: Sensors<'a>,
+    pub outputs: Outputs,
 }
 
 impl<'a> Board<'a> {
     pub fn new() -> Self {
-        let peripherals = Peripherals::take().expect("No surprise here :(");
+        let peripherals = Peripherals::take().expect("You're probably calling this twice!");
 
         log::info!("Setting up indicator");
         let led_pin = peripherals.pins.gpio21;
@@ -259,12 +263,14 @@ impl<'a> Board<'a> {
                         .expect("Failed to create ADC channel temperature");
                 let pressure_probe = AdcChannelDriver::new(&adc, peripherals.pins.gpio5, &config)
                     .expect("Failed to create ADC channel pressure");
-                let mut adc = crate::gpio::adc::Adc::new(
+                let mut adc = Adc::new(
                     temperature_probe,
                     pressure_probe,
                     config::ADC_POLLING_RATE_MS,
                     config::ADC_SAMPLES,
                 );
+
+                let mut poll_counter = 10;
 
                 loop {
                     if *sensor_killswitch_clone.lock().unwrap() {
@@ -272,9 +278,12 @@ impl<'a> Board<'a> {
                         return;
                     }
 
-                    if let Some(reading) = loadcell.read() {
-                        // [ ] Convert to grams
-                        *weight_clone.lock().unwrap() = reading;
+                    // Only poll scale every 100ms
+                    if poll_counter == 10 {
+                        poll_counter = 0;
+                        if let Some(reading) = loadcell.read() {
+                            *weight_clone.lock().unwrap() = reading;
+                        }
                     }
 
                     if let Some((temperature, pressure)) = adc.read() {
@@ -288,10 +297,78 @@ impl<'a> Board<'a> {
                             .set_pressure(pressure, seed_pressure_probe);
                     }
 
-                    FreeRtos::delay_ms(100);
+                    FreeRtos::delay_ms(10);
                 }
             })
             .expect("Failed to spawn sensor thread");
+
+        log::info!("Setting up outputs");
+
+        let boiler_duty_cycle = Arc::new(Mutex::new(0.0));
+        let pump_duty_cycle = Arc::new(Mutex::new(0.0));
+        let boiler_duty_cycle_clone = boiler_duty_cycle.clone();
+        let pump_duty_cycle_clone = pump_duty_cycle.clone();
+        let solenoid_state = Arc::new(Mutex::new(RelayState::Off));
+        let solenoid_state_clone = solenoid_state.clone();
+        let outputs_killswitch = Arc::new(Mutex::new(false));
+        let outputs_killswitch_clone = outputs_killswitch.clone();
+
+        let output_thread_handle = std::thread::Builder::new()
+            .name("Outputs".to_string())
+            .spawn(move || {
+                let mut boiler = PwmBuilder::new()
+                    .with_interval(config::BOILER_PWM_PERIOD)
+                    .with_pin(peripherals.pins.gpio12)
+                    .build();
+
+                let mut pump = PwmBuilder::new()
+                    .with_interval(config::PUMP_PWM_PERIOD)
+                    .with_pin(peripherals.pins.gpio14)
+                    .build();
+
+                let mut solenoid = Relay::new(peripherals.pins.gpio13, Some(true));
+
+                loop {
+                    if *outputs_killswitch_clone.lock().unwrap() {
+                        log::info!("Outputs thread killed");
+                        return;
+                    }
+                    let mut next_tick: Vec<Duration> = vec![config::OUTPUT_POLL_INTERVAL];
+
+                    let requested_boiler_duty_cycle = *boiler_duty_cycle_clone.lock().unwrap();
+                    if boiler.get_duty_cycle() != requested_boiler_duty_cycle {
+                        boiler.set_duty_cycle(requested_boiler_duty_cycle);
+                    }
+                    if let Some(duration) = boiler.tick() {
+                        next_tick.push(duration);
+                    }
+
+                    let requested_pump_duty_cycle = *pump_duty_cycle_clone.lock().unwrap();
+                    if pump.get_duty_cycle() != requested_pump_duty_cycle {
+                        pump.set_duty_cycle(requested_pump_duty_cycle);
+                    }
+                    if let Some(duration) = pump.tick() {
+                        next_tick.push(duration);
+                    }
+
+                    let requested_solenoid_state = *solenoid_state_clone.lock().unwrap();
+                    if solenoid.state != requested_solenoid_state {
+                        solenoid.state = requested_solenoid_state;
+                    }
+                    if let Some(duration) = solenoid.tick() {
+                        next_tick.push(duration);
+                    }
+
+                    FreeRtos::delay_ms(
+                        next_tick
+                            .iter()
+                            .min()
+                            .unwrap_or(&Duration::from_millis(100))
+                            .as_millis() as u32,
+                    );
+                }
+            })
+            .expect("Failed to spawn output thread");
 
         Board {
             indicators: Indicators {
@@ -310,6 +387,13 @@ impl<'a> Board<'a> {
                 kill_switch: sensor_killswitch,
                 temperature,
                 pressure,
+            },
+            outputs: Outputs {
+                boiler_duty_cycle,
+                pump_duty_cycle,
+                solenoid: solenoid_state,
+                handle: output_thread_handle,
+                kill_switch: outputs_killswitch,
             },
         }
     }
