@@ -68,6 +68,10 @@ where
         }
     }
 
+    pub fn is_high(&self) -> bool {
+        self.pin.is_high()
+    }
+
     pub fn enable(&mut self) {
         self.pin
             .enable_interrupt()

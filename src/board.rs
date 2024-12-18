@@ -5,6 +5,10 @@ use crate::gpio::{
 use crate::indicator::ring::{Ring, State as IndicatorState};
 use crate::sensors::scale::Scale as LoadCell;
 use crate::sensors::{pressure::SeeedWaterPressureSensor, pt100::Pt100};
+use crate::state_machines::{
+    operational_fsm::{OperationalState, Transitions},
+    ArcMutexState,
+};
 use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
@@ -15,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ButtonEnum {
     Brew,
     Steam,
@@ -64,7 +69,6 @@ where
         if self.was_button_pressed(ButtonEnum::HotWater) {
             buttons.push(ButtonEnum::HotWater);
         }
-
         buttons
     }
 }
@@ -161,6 +165,12 @@ pub struct Outputs {
     kill_switch: Arc<Mutex<bool>>,
 }
 
+impl Outputs {
+    pub fn kill(&self) {
+        *self.kill_switch.lock().unwrap() = true;
+    }
+}
+
 pub struct Board<'a> {
     pub indicators: Indicators,
     pub sensors: Sensors<'a>,
@@ -168,10 +178,18 @@ pub struct Board<'a> {
 }
 
 impl<'a> Board<'a> {
-    pub fn new() -> Self {
+    pub fn new(operational_state: Arc<Mutex<OperationalState>>) -> Self {
+        operational_state
+            .transition(Transitions::StartingUpStage("Board Setup".to_string()))
+            .expect("Failed to set operational state");
+
         let peripherals = Peripherals::take().expect("You're probably calling this twice!");
 
         log::info!("Setting up indicator");
+        operational_state
+            .transition(Transitions::StartingUpStage("Indicator Setup".to_string()))
+            .expect("Failed to set operational state");
+
         let led_pin = peripherals.pins.gpio21;
         let channel = peripherals.rmt.channel0;
 
@@ -208,6 +226,9 @@ impl<'a> Board<'a> {
             })
             .expect("Failed to spawn indicator thread");
 
+        operational_state
+            .transition(Transitions::StartingUpStage("Input Setup".to_string()))
+            .expect("Failed to set operational state");
         log::info!("Setting up buttons");
         let mut button_brew = Button::new(peripherals.pins.gpio6, None);
         let mut button_steam = Button::new(peripherals.pins.gpio15, None);
@@ -302,6 +323,9 @@ impl<'a> Board<'a> {
             })
             .expect("Failed to spawn sensor thread");
 
+        operational_state
+            .transition(Transitions::StartingUpStage("Output Setup".to_string()))
+            .expect("Failed to set operational state");
         log::info!("Setting up outputs");
 
         let boiler_duty_cycle = Arc::new(Mutex::new(0.0));
@@ -395,6 +419,117 @@ impl<'a> Board<'a> {
                 handle: output_thread_handle,
                 kill_switch: outputs_killswitch,
             },
+        }
+    }
+
+    pub fn open_valve(&self, duration: Option<Duration>) {
+        *self.outputs.solenoid.lock().unwrap() = RelayState::on(duration);
+    }
+    pub fn close_valve(&self, duration: Option<Duration>) {
+        *self.outputs.solenoid.lock().unwrap() = RelayState::off(duration);
+    }
+}
+
+pub enum Action {
+    SetBoialerDutyCycle(f32),
+    SetPumpDutyCycle(f32),
+    OpenValve(Option<Duration>),
+    CloseValve(Option<Duration>),
+    SetIndicator(IndicatorState),
+}
+
+impl Action {
+    pub fn execute(&self, board: Arc<Mutex<Board>>) {
+        let board = board.lock().unwrap();
+        match self {
+            Action::SetBoialerDutyCycle(duty_cycle) => {
+                *board.outputs.boiler_duty_cycle.lock().unwrap() = *duty_cycle;
+            }
+            Action::SetPumpDutyCycle(duty_cycle) => {
+                *board.outputs.pump_duty_cycle.lock().unwrap() = *duty_cycle;
+            }
+            Action::OpenValve(duration) => {
+                board.open_valve(*duration);
+            }
+            Action::CloseValve(duration) => {
+                board.close_valve(*duration);
+            }
+            Action::SetIndicator(state) => {
+                board.indicators.set_state(*state);
+            }
+        }
+    }
+}
+
+pub enum Reading {
+    BoilerTemperature(Option<f32>),
+    PumpPressure(Option<f32>),
+    ScaleWeight(Option<f32>),
+    BrewSwitchState(Option<bool>),
+    SteamSwitchState(Option<bool>),
+    HotWaterSwitchState(Option<bool>),
+    AllButtonsState(Option<Vec<ButtonEnum>>),
+}
+
+impl Reading {
+    pub fn get(&self, board: Arc<Mutex<Board>>) -> Self {
+        let mut board = board.lock().unwrap();
+        match self {
+            Reading::BoilerTemperature(_) => Reading::BoilerTemperature(Some(
+                board.sensors.temperature.lock().unwrap().get_temperature(),
+            )),
+            Reading::PumpPressure(_) => {
+                Reading::PumpPressure(Some(board.sensors.pressure.lock().unwrap().get_pressure()))
+            }
+            Reading::ScaleWeight(_) => Reading::ScaleWeight(Some(board.sensors.scale.get_weight())),
+            Reading::BrewSwitchState(_) => {
+                Reading::BrewSwitchState(Some(board.sensors.buttons.brew_button.was_pressed()))
+            }
+            Reading::SteamSwitchState(_) => {
+                Reading::SteamSwitchState(Some(board.sensors.buttons.steam_button.was_pressed()))
+            }
+            Reading::HotWaterSwitchState(_) => Reading::HotWaterSwitchState(Some(
+                board.sensors.buttons.hot_water_button.was_pressed(),
+            )),
+            Reading::AllButtonsState(_) => {
+                Reading::AllButtonsState(Some(board.sensors.buttons.button_presses()))
+            }
+        }
+    }
+}
+
+pub enum F32Read {
+    BoilerTemperature,
+    PumpPressure,
+    ScaleWeight,
+}
+
+impl F32Read {
+    pub fn get(&self, board: Arc<Mutex<Board>>) -> f32 {
+        let board = board.lock().unwrap();
+        match self {
+            F32Read::BoilerTemperature => {
+                board.sensors.temperature.lock().unwrap().get_temperature()
+            }
+            F32Read::PumpPressure => board.sensors.pressure.lock().unwrap().get_pressure(),
+            F32Read::ScaleWeight => board.sensors.scale.get_weight(),
+        }
+    }
+}
+
+pub enum BoolRead {
+    Brew,
+    Steam,
+    HotWater,
+}
+
+impl BoolRead {
+    pub fn get(&self, board: Arc<Mutex<Board>>) -> bool {
+        let mut board = board.lock().unwrap();
+        match self {
+            BoolRead::Brew => board.sensors.buttons.brew_button.was_pressed(),
+            BoolRead::Steam => board.sensors.buttons.steam_button.was_pressed(),
+            BoolRead::HotWater => board.sensors.buttons.hot_water_button.was_pressed(),
         }
     }
 }

@@ -1,6 +1,7 @@
 #[derive(Debug)]
 pub enum Error {
     InvalidStateTransition(String),
+    Busy(String),
     InvalidState(String),
     SystemAlreadyInHigherErrorState(String),
     SystemInErrorState(String),
@@ -23,6 +24,7 @@ impl std::fmt::Display for Error {
             Error::SystemInErrorState(message) => write!(f, "SystemInErrorState: {}", message),
             Error::_Internal(message) => write!(f, "InternalError: {}", message),
             Error::NotYetImplemented => write!(f, "NotYetImplemented"),
+            Error::Busy(message) => write!(f, "Busy: {}", message),
         }
     }
 }
@@ -37,6 +39,7 @@ impl std::error::Error for Error {
             Error::SystemInPanicState(_) => "System in panic state",
             Error::_Internal(_) => "Internal error",
             Error::NotYetImplemented => "Not yet implemented",
+            Error::Busy(_) => "Busy",
         }
     }
 }

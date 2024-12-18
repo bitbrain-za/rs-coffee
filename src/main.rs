@@ -12,6 +12,7 @@ mod sensors;
 mod state_machines;
 use anyhow::Result;
 use app_state::System;
+use board::{Action, F32Read, Reading};
 use std::thread;
 use std::time::Duration;
 
@@ -21,23 +22,27 @@ fn main() -> Result<()> {
     log::info!("Starting up");
 
     let system = System::new();
-    let mut board = system.board.lock().unwrap();
 
     log::info!("Setup complete, starting main loop");
     /**************** TEST SECTION  ****************/
-    *board.outputs.boiler_duty_cycle.lock().unwrap() = 0.5;
-    *board.outputs.pump_duty_cycle.lock().unwrap() = 0.2;
-    *board.outputs.solenoid.lock().unwrap() = gpio::relay::State::on(Some(Duration::from_secs(5)));
+    {
+        let board = system.board.lock().unwrap();
+        *board.outputs.boiler_duty_cycle.lock().unwrap() = 0.5;
+        *board.outputs.pump_duty_cycle.lock().unwrap() = 0.2;
+        *board.outputs.solenoid.lock().unwrap() =
+            gpio::relay::State::on(Some(Duration::from_secs(5)));
+    }
 
     let mut level = 0.0;
     let mut start = std::time::Instant::now() - std::time::Duration::from_millis(200);
     loop {
         if start.elapsed() > std::time::Duration::from_millis(200) {
-            board.indicators.set_state(indicator::ring::State::Guage {
+            let indicator = indicator::ring::State::Guage {
                 min: 0.0,
                 max: 100.0,
                 level,
-            });
+            };
+            system.execute_board_action(Action::SetIndicator(indicator));
 
             level += 1.0;
             if level > 100.0 {
@@ -46,19 +51,26 @@ fn main() -> Result<()> {
             start = std::time::Instant::now();
         }
 
-        let boiler_temperature = board.sensors.temperature.lock().unwrap().get_temperature();
-        let pump_pressure = board.sensors.pressure.lock().unwrap().get_pressure();
+        let boiler_temperature = system.read_f32(F32Read::BoilerTemperature);
+        let pump_pressure = system.read_f32(F32Read::PumpPressure);
         println!("Boiler temperature: {}", boiler_temperature);
         println!("Pump pressure: {}", pump_pressure);
-        println!("Weight: {}", board.sensors.scale.get_weight());
+        println!("Weight: {}", system.read_f32(F32Read::ScaleWeight));
 
-        let presses = board.sensors.buttons.button_presses();
-        if !presses.is_empty() {
-            for button in presses {
-                println!("Button pressed: {}", button);
+        if let Reading::AllButtonsState(Some(presses)) =
+            system.do_board_read(Reading::AllButtonsState(None))
+        {
+            if !presses.is_empty() {
+                for button in presses {
+                    println!("Button pressed: {}", button);
+
+                    if button == board::ButtonEnum::Brew {
+                        system
+                            .execute_board_action(Action::OpenValve(Some(Duration::from_secs(5))));
+                    }
+                }
             }
         }
-
         thread::sleep(Duration::from_millis(1000));
     }
     /***********************************************/
