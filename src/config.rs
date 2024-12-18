@@ -18,3 +18,4 @@ pub const LED_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
 pub const IDLE_TEMPERATURE: f32 = 60.0;
 pub const BOILER_POWER: u16 = 2000;
+pub const INITIAL_TEMPERATURE: f32 = 25.0;
