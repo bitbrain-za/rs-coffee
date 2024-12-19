@@ -42,8 +42,40 @@ impl<'a> System<'a> {
         }
     }
 
-    pub fn execute_board_action(&self, action: crate::board::Action) {
-        action.execute(self.board.clone());
+    pub fn execute_board_action(&self, action: Action) -> Result<(), String> {
+        let system_state = self.system_state.lock().unwrap().clone();
+
+        match (system_state, &action) {
+            /* Restrictive States */
+            (SystemState::Panic(_), Action::Panic) => {
+                action.execute(self.board.clone());
+                Ok(())
+            }
+            (SystemState::Panic(message), _) => Err(message),
+
+            (SystemState::Error(_), Action::Panic) => {
+                action.execute(self.board.clone());
+                Ok(())
+            }
+            (SystemState::Error(_), Action::Error) => {
+                action.execute(self.board.clone());
+                Ok(())
+            }
+            (SystemState::Error(message), _) => Err(message),
+
+            /* Permissive States */
+            (SystemState::Healthy, _) => {
+                action.execute(self.board.clone());
+                Ok(())
+            }
+            (SystemState::Warning(message), _) => {
+                log::warn!("Executing action while in warning state: {}", message);
+                action.execute(self.board.clone());
+                Ok(())
+            }
+
+            (_, _) => Err("unhandled".to_string()),
+        }
     }
 
     pub fn do_board_read(&self, reading: crate::board::Reading) -> crate::board::Reading {
@@ -60,13 +92,17 @@ impl<'a> System<'a> {
 
     pub fn error(&self, message: String) {
         if self.system_state.lock().unwrap().set_error(message).is_ok() {
-            self.execute_board_action(Action::Error);
+            if let Err(e) = self.execute_board_action(Action::Error) {
+                log::error!("Unable to execute requested action: {}", e);
+            }
         }
     }
 
     pub fn panic(&self, message: String) {
         if self.system_state.lock().unwrap().panic(message).is_ok() {
-            self.execute_board_action(Action::Panic);
+            if let Err(e) = self.execute_board_action(Action::Panic) {
+                log::error!("Unable to execute requested action: {}", e);
+            }
         }
     }
 }

@@ -13,6 +13,7 @@ mod state_machines;
 use anyhow::Result;
 use app_state::System;
 use board::{Action, F32Read, Reading};
+use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
 use std::thread;
 use std::time::Duration;
@@ -34,9 +35,6 @@ fn main() -> Result<()> {
             gpio::relay::State::on(Some(Duration::from_secs(5)));
     }
 
-    let mut level = 0.0;
-    let mut start = std::time::Instant::now() - std::time::Duration::from_millis(200);
-
     system
         .system_state
         .lock()
@@ -46,37 +44,81 @@ fn main() -> Result<()> {
 
     loop {
         let system_state = system.system_state.lock().unwrap().clone();
+        let operational_state = system.operational_state.lock().unwrap().clone();
 
-        match system_state {
-            SystemState::Healthy => {
-                if start.elapsed() > std::time::Duration::from_millis(200) {
-                    let indicator = indicator::ring::State::Guage {
-                        min: 0.0,
-                        max: 100.0,
-                        level,
-                    };
-                    system.execute_board_action(Action::SetIndicator(indicator));
+        match (system_state, operational_state) {
+            (SystemState::Healthy, operational_state) => {
+                let boiler_temperature = system.read_f32(F32Read::BoilerTemperature);
+                let pump_pressure = system.read_f32(F32Read::PumpPressure);
+                println!("Boiler temperature: {}", boiler_temperature);
+                println!("Pump pressure: {}", pump_pressure);
+                println!("Weight: {}", system.read_f32(F32Read::ScaleWeight));
 
-                    level += 1.0;
-                    if level > 100.0 {
-                        level = 0.0;
+                match operational_state {
+                    OperationalState::Idle => {
+                        let _ = system.execute_board_action(Action::SetIndicator(
+                            indicator::ring::State::Idle,
+                        ));
                     }
-                    start = std::time::Instant::now();
-                    let boiler_temperature = system.read_f32(F32Read::BoilerTemperature);
-                    let pump_pressure = system.read_f32(F32Read::PumpPressure);
-                    println!("Boiler temperature: {}", boiler_temperature);
-                    println!("Pump pressure: {}", pump_pressure);
-                    println!("Weight: {}", system.read_f32(F32Read::ScaleWeight));
+                    OperationalState::Brewing => {
+                        let indicator = indicator::ring::State::Temperature {
+                            min: 25.0,
+                            max: 100.0,
+                            level: boiler_temperature,
+                        };
+                        let _ = system.execute_board_action(Action::SetIndicator(indicator));
+                    }
+                    OperationalState::Steaming => {
+                        let indicator = indicator::ring::State::Temperature {
+                            min: 25.0,
+                            max: 140.0,
+                            level: boiler_temperature,
+                        };
+                        let _ = system.execute_board_action(Action::SetIndicator(indicator));
+                    }
+                    OperationalState::AutoTuning(_, _) => {
+                        /* We have to run the device for a bit and collect it's dynamics
+                           once that's expired, we do a curve fit to get the parameters
+                           for the boiler model.
+
+                           Step 1. Run for an hour collecting data
+                           Step 2. Fit curve
+                           Step 3. Update parameters
+                        */
+
+                        log::info!("Autotuning in progress");
+                        log::info!("{}", operational_state);
+                        let indicator =
+                            if let Some(percentage) = operational_state.percentage_complete() {
+                                log::info!("Autotuning is {:.2}% complete", percentage);
+                                indicator::ring::State::Guage {
+                                    min: 0.0,
+                                    max: 100.0,
+                                    level: percentage,
+                                }
+                            } else {
+                                log::error!("Couldn't get percentage completed");
+                                indicator::ring::State::Temperature {
+                                    min: 25.0,
+                                    max: 150.0,
+                                    level: boiler_temperature,
+                                }
+                            };
+                        let _ = system.execute_board_action(Action::SetIndicator(indicator));
+                    }
+                    _ => {}
                 }
             }
-            SystemState::Error(message) => {
+            (SystemState::Error(message), _) => {
                 log::error!("System is in an error state: {}", message);
             }
-            SystemState::Panic(message) => {
+            (SystemState::Panic(message), _) => {
                 log::error!("System is in a panic state: {}", message);
             }
 
-            _ => {}
+            (_, _) => {
+                log::error!("unhandled state")
+            }
         }
 
         if let Reading::AllButtonsState(Some(presses)) =
@@ -87,7 +129,7 @@ fn main() -> Result<()> {
                     println!("Button pressed: {}", button);
 
                     if button == board::ButtonEnum::Brew {
-                        system
+                        let _ = system
                             .execute_board_action(Action::OpenValve(Some(Duration::from_secs(5))));
                     }
                     if button == board::ButtonEnum::HotWater {

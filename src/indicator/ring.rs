@@ -23,6 +23,7 @@ pub enum State {
         max: f32,
         level: f32,
     },
+    Idle,
     Busy,
     Panic,
     Error,
@@ -57,24 +58,26 @@ impl<'d> Ring<'d> {
 
     pub fn set_state(&mut self, state: State) {
         match state {
-            State::Error => {
+            State::Panic => {
                 self.effect = Box::new(strip::Strobe::new(
                     self.count,
                     Some(Srgb::new(255, 0, 0)),
-                    Duration::from_millis(500),
+                    Duration::from_millis(100),
                     None,
                 ));
             }
-            State::Panic => {
-                self.effect = Box::new(strip::Wipe::colour_wipe(
+            State::Error => {
+                self.effect = Box::new(strip::Cylon::new(
                     self.count,
-                    Some(Srgb::new(255, 0, 0)),
-                    false,
+                    Srgb::new(255, 0, 0),
+                    None,
+                    None,
                 ));
             }
             State::Busy => {
                 self.effect = Box::new(strip::RunningLights::new(self.count, None, false));
             }
+            State::Idle => self.effect = Box::new(strip::Breathe::new(self.count, None, None)),
             State::Guage { min, max, level } => {
                 let mut progress = strip::ProgressBar::new(
                     self.count,
