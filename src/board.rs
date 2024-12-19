@@ -436,6 +436,8 @@ pub enum Action {
     OpenValve(Option<Duration>),
     CloseValve(Option<Duration>),
     SetIndicator(IndicatorState),
+    Panic,
+    Error,
 }
 
 impl Action {
@@ -456,6 +458,12 @@ impl Action {
             }
             Action::SetIndicator(state) => {
                 board.indicators.set_state(*state);
+            }
+            Action::Error => {
+                board.indicators.set_state(IndicatorState::Error);
+            }
+            Action::Panic => {
+                board.indicators.set_state(IndicatorState::Panic);
             }
         }
     }

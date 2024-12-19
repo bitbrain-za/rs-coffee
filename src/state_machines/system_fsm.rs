@@ -113,4 +113,12 @@ impl SystemState {
             Err(e) => Err(e),
         }
     }
+
+    pub fn set_error(&mut self, message: String) -> Result<(), Error> {
+        self.transition(Transition::Error(message))
+    }
+
+    pub fn panic(&mut self, message: String) -> Result<(), Error> {
+        self.transition(Transition::Panic(message))
+    }
 }

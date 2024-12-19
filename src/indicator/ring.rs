@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use esp_idf_hal::{gpio::OutputPin, peripheral::Peripheral, rmt::RmtChannel};
 use smart_led_effects::{
     strip::{self, EffectIterator},
@@ -22,6 +24,8 @@ pub enum State {
         level: f32,
     },
     Busy,
+    Panic,
+    Error,
 }
 
 pub struct Ring<'d> {
@@ -53,6 +57,21 @@ impl<'d> Ring<'d> {
 
     pub fn set_state(&mut self, state: State) {
         match state {
+            State::Error => {
+                self.effect = Box::new(strip::Strobe::new(
+                    self.count,
+                    Some(Srgb::new(255, 0, 0)),
+                    Duration::from_millis(500),
+                    None,
+                ));
+            }
+            State::Panic => {
+                self.effect = Box::new(strip::Wipe::colour_wipe(
+                    self.count,
+                    Some(Srgb::new(255, 0, 0)),
+                    false,
+                ));
+            }
             State::Busy => {
                 self.effect = Box::new(strip::RunningLights::new(self.count, None, false));
             }

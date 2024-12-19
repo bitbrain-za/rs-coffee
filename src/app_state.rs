@@ -1,4 +1,4 @@
-use crate::board::{Board, Reading};
+use crate::board::{Action, Board, Reading};
 use crate::state_machines::{
     operational_fsm::{OperationalState, Transitions},
     system_fsm::SystemState,
@@ -56,5 +56,17 @@ impl<'a> System<'a> {
 
     pub fn read_bool(&self, reading: crate::board::BoolRead) -> bool {
         reading.get(self.board.clone())
+    }
+
+    pub fn error(&self, message: String) {
+        if self.system_state.lock().unwrap().set_error(message).is_ok() {
+            self.execute_board_action(Action::Error);
+        }
+    }
+
+    pub fn panic(&self, message: String) {
+        if self.system_state.lock().unwrap().panic(message).is_ok() {
+            self.execute_board_action(Action::Panic);
+        }
     }
 }
