@@ -48,6 +48,11 @@ loadcell = "0.2.0"
 postcard = "1"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
+ndarray = "0.15.6"
+argmin = "0.10.0"
+argmin-math = { version = "0.4.0", features = ["ndarray_v0_15-nolinalg"] }
+rand = "0.8.4"
+rand_distr = "0.4.2"
 
 [build-dependencies]
 embuild = "0.32.0"

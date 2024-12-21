@@ -90,52 +90,63 @@ impl BoilerModel {
         self.flow_rate_kg_per_sec = flow_rate / 1000.0;
     }
 
-    pub fn update(&mut self, power: f32, ambient_temperature: f32, dt: Duration) -> (f32, f32) {
+    pub fn predict_change(
+        &self,
+        boiler_temperature: f32,
+        probe_temperature: f32,
+        power: f32,
+        ambient_temperature: f32,
+        dt: Duration,
+    ) -> (f32, f32) {
         // Heat loss rate due to the flow of water at ambient temperature into the boiler
         let flow_heat_loss = self.flow_rate_kg_per_sec
             * self.parameters.thermal_mass
-            * (self.boiler_temperature - ambient_temperature);
+            * (boiler_temperature - ambient_temperature);
 
         // Boiler temperature change including flow heat loss
         let d_temp_d_time_boiler = (power
             - (self.parameters.ambient_transfer_coefficient
-                * (self.boiler_temperature - ambient_temperature))
+                * (boiler_temperature - ambient_temperature))
             - flow_heat_loss)
             / self.parameters.thermal_mass;
         let delta_boiler = d_temp_d_time_boiler * dt.as_secs_f32();
 
         // Probe temperature change (dependent on boiler temperature)
         let d_temp_d_time_probe = self.parameters.probe_transfer_coefficient
-            * (self.boiler_temperature - self.probe_temperature);
+            * (self.boiler_temperature - probe_temperature);
         let delta_probe = d_temp_d_time_probe * dt.as_secs_f32();
 
-        // Update states
-        self.boiler_temperature += delta_boiler;
-        self.probe_temperature += delta_probe;
-
-        self.measure()
+        (
+            boiler_temperature + delta_boiler,
+            probe_temperature + delta_probe,
+        )
     }
 
-    // To determine boiler paramters, we run the boiler for a period and get the curve.
-    // We run the simulator for the same power and interval set and curve fit.
+    pub fn update(&mut self, power: f32, ambient_temperature: f32, dt: Duration) -> (f32, f32) {
+        (self.boiler_temperature, self.ambient_temperature) = self.predict_change(
+            self.boiler_temperature,
+            self.probe_temperature,
+            power,
+            ambient_temperature,
+            dt,
+        );
+
+        (self.boiler_temperature, self.probe_temperature)
+    }
+
     pub fn simulate(
         &mut self,
         power: &[f32],
-        ambient_temperature: &[f32],
+        ambient_temperature: f32,
         interval: &[Duration],
     ) -> Vec<(f32, f32)> {
-        assert_eq!(power.len(), ambient_temperature.len());
+        assert_eq!(power.len(), interval.len());
 
         power
             .iter()
-            .zip(ambient_temperature.iter())
             .zip(interval.iter())
-            .map(|(p, interval)| self.update(*p.0, *p.1, *interval))
+            .map(|(p, interval)| self.update(*p, ambient_temperature, *interval))
             .collect()
-    }
-
-    pub fn measure(&self) -> (f32, f32) {
-        (self.boiler_temperature, self.probe_temperature)
     }
 
     pub fn capture_tuning_point(&mut self, power: f32) {

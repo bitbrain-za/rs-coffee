@@ -510,6 +510,8 @@ pub enum F32Read {
     BoilerTemperature,
     PumpPressure,
     ScaleWeight,
+    BoilerDutyCycle,
+    PumpDutyCycle,
 }
 
 impl F32Read {
@@ -521,6 +523,8 @@ impl F32Read {
             }
             F32Read::PumpPressure => board.sensors.pressure.lock().unwrap().get_pressure(),
             F32Read::ScaleWeight => board.sensors.scale.get_weight(),
+            F32Read::BoilerDutyCycle => *board.outputs.boiler_duty_cycle.lock().unwrap(),
+            F32Read::PumpDutyCycle => *board.outputs.pump_duty_cycle.lock().unwrap(),
         }
     }
 }
