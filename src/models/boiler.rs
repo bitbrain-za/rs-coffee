@@ -14,8 +14,8 @@ impl Default for BoilerModelParameters {
     fn default() -> Self {
         Self {
             thermal_mass: 1255.8,
-            ambient_transfer_coefficient: 0.8,
-            probe_responsiveness: 0.0125,
+            ambient_transfer_coefficient: 0.0664,
+            probe_responsiveness: 0.1,
         }
     }
 }
@@ -101,47 +101,28 @@ impl BoilerModel {
     pub fn get_actual_temperature(&self) -> f32 {
         self.boiler_temperature
     }
-
-    pub fn predict_change(
-        &self,
-        boiler_temperature: f32,
-        probe_temperature: f32,
-        power: f32,
-        ambient_temperature: f32,
-        dt: Duration,
-    ) -> (f32, f32) {
+    pub fn update(&mut self, power: f32, dt: Duration) -> (f32, f32) {
         // Heat loss rate due to the flow of water at ambient temperature into the boiler
         let flow_heat_loss = self.flow_rate_kg_per_sec
             * self.parameters.thermal_mass
-            * (boiler_temperature - ambient_temperature);
+            * (self.boiler_temperature - self.ambient_temperature);
 
         // Boiler temperature change including flow heat loss
         let d_temp_d_time_boiler = (power
             - (self.parameters.ambient_transfer_coefficient
-                * (boiler_temperature - ambient_temperature))
+                * (self.boiler_temperature - self.ambient_temperature))
             - flow_heat_loss)
             / self.parameters.thermal_mass;
         let delta_boiler = d_temp_d_time_boiler * dt.as_secs_f32();
 
         // Probe temperature change (dependent on boiler temperature)
-        let d_temp_d_time_probe =
-            self.parameters.probe_responsiveness * (self.boiler_temperature - probe_temperature);
+        let d_temp_d_time_probe = self.parameters.probe_responsiveness
+            * (self.boiler_temperature - self.probe_temperature);
         let delta_probe = d_temp_d_time_probe * dt.as_secs_f32();
 
-        (
-            boiler_temperature + delta_boiler,
-            probe_temperature + delta_probe,
-        )
-    }
-
-    pub fn update(&mut self, power: f32, dt: Duration) -> (f32, f32) {
-        (self.boiler_temperature, self.ambient_temperature) = self.predict_change(
-            self.boiler_temperature,
-            self.probe_temperature,
-            power,
-            self.ambient_temperature,
-            dt,
-        );
+        // Update states
+        self.boiler_temperature += delta_boiler;
+        self.probe_temperature += delta_probe;
 
         (self.boiler_temperature, self.probe_temperature)
     }

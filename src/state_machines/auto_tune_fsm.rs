@@ -72,7 +72,7 @@ impl<'a> AutoTuner<'a> {
     pub fn run(&mut self) -> Option<BoilerModelParameters> {
         match self.state {
             State::Setup => {
-                println!("Setting up auto-tuner");
+                log::info!("Setting up auto-tuner");
                 self.state = State::GatheringData;
                 None
             }
@@ -109,13 +109,13 @@ impl<'a> AutoTuner<'a> {
                 None
             }
             State::AnalyzingData => {
-                println!("Analyzing data");
+                log::info!("Analyzing data");
                 // so we have a bunch of data. Now lets simulate and generate similar data
                 self.state = State::Done;
                 None
             }
             State::Done => {
-                println!("Auto-tuner complete");
+                log::info!("Auto-tuner complete");
                 self.parameters
             }
         }

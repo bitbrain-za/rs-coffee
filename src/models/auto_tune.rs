@@ -171,7 +171,7 @@ impl HeuristicAutoTuner {
         self.time_to_halfway_point = None;
 
         let start_time = Instant::now();
-        let mut next_test_time = start_time + self.sample_time;
+        let mut next_test_time = start_time + test_interval;
 
         let current_temperature = self.get_probe();
         for i in 0..3 {
@@ -185,6 +185,11 @@ impl HeuristicAutoTuner {
 
             if current_time >= next_test_time {
                 let current_temperature = self.get_probe();
+                log::trace!(
+                    "Sample @ {:?}s = {} degees",
+                    current_time,
+                    current_temperature
+                );
 
                 if current_temperature < target / 2.0 {
                     self.temperature_samples[0] = self.temperature_samples[1];
@@ -463,25 +468,29 @@ impl HeuristicAutoTuner {
     pub fn auto_tune() -> Result<(), Error> {
         let mut auto_tuner = HeuristicAutoTuner::new(Duration::from_millis(1000));
 
-        log::debug!("Measurt ambient temperature");
+        log::info!("Measurt ambient temperature");
         auto_tuner.measure_ambient(Duration::from_secs(60), 1.0, None)?;
+        log::debug!(
+            "Ambient Temperature = {}",
+            auto_tuner.boiler_simulator.ambient_temperature
+        );
 
-        log::debug!("Measuring heatup");
+        log::info!("Measuring heatup");
         auto_tuner.measure_heatup(TARGET_TEMPERATURE)?;
 
-        log::debug!("Estimating values from heatup");
+        log::info!("Estimating values from heatup");
         let estimated_temperature = auto_tuner.estimate_values_from_heatup()?;
 
         auto_tuner.settle_down(estimated_temperature);
 
-        log::debug!("Measuring ambient transfer");
+        log::info!("Measuring ambient transfer");
         let power = auto_tuner.measure_ambient_transfer(
             Duration::from_secs(500),
             Duration::from_secs(0),
             estimated_temperature,
         )?;
 
-        log::debug!("Estimating values from thermal transfer");
+        log::info!("Estimating values from thermal transfer");
         let results =
             auto_tuner.estimate_values_from_thermal_transfer(power, estimated_temperature)?;
 

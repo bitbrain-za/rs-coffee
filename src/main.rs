@@ -21,7 +21,27 @@ use std::time::Duration;
 fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
+
+    let logger = esp_idf_svc::log::EspLogger;
+    logger
+        .set_target_level("*", log::LevelFilter::Debug)
+        .unwrap();
+    logger
+        .set_target_level("rmt(legacy)", log::LevelFilter::Info)
+        .unwrap();
+    logger
+        .set_target_level("efuse", log::LevelFilter::Info)
+        .unwrap();
+
     log::info!("Starting up");
+
+    #[cfg(feature = "simulate")]
+    {
+        log::info!("Running simulation");
+        if let Err(e) = models::auto_tune::HeuristicAutoTuner::auto_tune() {
+            log::error!("{:?}", e);
+        }
+    }
 
     let system = System::new();
     {
@@ -48,9 +68,9 @@ fn main() -> Result<()> {
             (SystemState::Healthy, operational_state) => {
                 let boiler_temperature = system.read_f32(F32Read::BoilerTemperature);
                 let pump_pressure = system.read_f32(F32Read::PumpPressure);
-                println!("Boiler temperature: {}", boiler_temperature);
-                println!("Pump pressure: {}", pump_pressure);
-                println!("Weight: {}", system.read_f32(F32Read::ScaleWeight));
+                log::debug!("Boiler temperature: {}", boiler_temperature);
+                log::debug!("Pump pressure: {}", pump_pressure);
+                log::debug!("Weight: {}", system.read_f32(F32Read::ScaleWeight));
 
                 match operational_state {
                     OperationalState::Idle => {
@@ -126,7 +146,7 @@ fn main() -> Result<()> {
         {
             if !presses.is_empty() {
                 for button in presses {
-                    println!("Button pressed: {}", button);
+                    log::info!("Button pressed: {}", button);
 
                     if button == board::ButtonEnum::Brew {
                         let _ = system
