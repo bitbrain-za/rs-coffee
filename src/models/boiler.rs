@@ -85,6 +85,10 @@ impl BoilerModel {
         }
     }
 
+    pub fn print(&self) {
+        log::info!("Boiler Model Parameters:\n{}", self.parameters);
+    }
+
     pub fn set_flow_rate_ml_per_sec(&mut self, flow_rate: f32) {
         self.flow_rate_kg_per_sec = flow_rate / 1000.0;
     }

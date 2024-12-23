@@ -1,3 +1,5 @@
+use esp_idf_hal::delay::FreeRtos;
+
 use crate::models::boiler::{BoilerModel, BoilerModelParameters};
 use std::time::{Duration, Instant};
 
@@ -34,6 +36,30 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
+enum Step {
+    Setup,
+    Run,
+    Done,
+}
+
+enum AmbientMeasurementSteps {
+    Setup,
+    Sample1,
+    WaitUntil(Instant),
+    Sample2,
+    Done(f32),
+}
+
+#[derive(Default)]
+enum Mode {
+    #[default]
+    Setup,
+    Ambient(AmbientMeasurementSteps),
+    Heatup(Step),
+    Settle(Step),
+    Transfer(Step),
+}
+
 #[derive(Default)]
 pub struct HeuristicAutoTuner {
     sample_time: Duration,
@@ -46,6 +72,7 @@ pub struct HeuristicAutoTuner {
     boiler_simulator: BoilerModel,
     differential_data: DifferentialData,
     results: Option<BoilerModelParameters>,
+    mode: Mode,
 }
 
 impl HeuristicAutoTuner {
@@ -124,7 +151,8 @@ impl HeuristicAutoTuner {
         duration: Duration,
         max_delta: f32,
         timeout: Option<Duration>,
-    ) -> Result<f32, Error> {
+        state: AmbientMeasurementSteps,
+    ) -> Result<AmbientMeasurementSteps, Error> {
         let mut retries = timeout.map(|t| t.as_millis() / duration.as_millis());
 
         loop {
@@ -377,6 +405,7 @@ impl HeuristicAutoTuner {
                 * (-boiler_responsiveness * elapsed_time_heating).exp();
 
         log::trace!("Estimated temperature: {}", estimated_temperature);
+        #[cfg(feature = "simulate")]
         log::trace!(
             "Actual temperature: {}",
             self.boiler_simulator.get_actual_temperature()
@@ -465,38 +494,59 @@ impl HeuristicAutoTuner {
         }
     }
 
-    pub fn auto_tune() -> Result<(), Error> {
-        let mut auto_tuner = HeuristicAutoTuner::new(Duration::from_millis(1000));
+    pub fn auto_tune(&mut self) -> Result<(), Error> {
+        loop {
+            FreeRtos::delay_ms(self.sample_time.as_millis() as u32);
 
+            match self.mode {
+                Mode::Setup => {
+                    log::info!("Setting up");
+                    self.mode = Mode::Ambient(AmbientMeasurementSteps::Setup);
+                }
+                Mode::Ambient(AmbientMeasurementSteps::Setup) => {
+                    log::info!("Measuring ambient temperature");
+                    self.mode = Mode::Ambient(AmbientMeasurementSteps::Sample1);
+                }
+                Mode::Ambient(step) => {
+                    log::info!("Measuring ambient temperature");
+                    self.measure_ambient(Duration::from_secs(60), 1.0, None)?;
+                    log::debug!(
+                        "Ambient Temperature = {}",
+                        self.boiler_simulator.ambient_temperature
+                    );
+                    self.mode = Mode::Heatup(Step::Setup);
+                }
+                _ => todo!(),
+            }
+        }
         log::info!("Measurt ambient temperature");
-        auto_tuner.measure_ambient(Duration::from_secs(60), 1.0, None)?;
+        self.measure_ambient(Duration::from_secs(60), 1.0, None)?;
         log::debug!(
             "Ambient Temperature = {}",
-            auto_tuner.boiler_simulator.ambient_temperature
+            self.boiler_simulator.ambient_temperature
         );
 
         log::info!("Measuring heatup");
-        auto_tuner.measure_heatup(TARGET_TEMPERATURE)?;
+        self.measure_heatup(TARGET_TEMPERATURE)?;
 
         log::info!("Estimating values from heatup");
-        let estimated_temperature = auto_tuner.estimate_values_from_heatup()?;
+        let estimated_temperature = self.estimate_values_from_heatup()?;
 
-        auto_tuner.settle_down(estimated_temperature);
+        self.settle_down(estimated_temperature);
 
         log::info!("Measuring ambient transfer");
-        let power = auto_tuner.measure_ambient_transfer(
+        let power = self.measure_ambient_transfer(
             Duration::from_secs(500),
             Duration::from_secs(0),
             estimated_temperature,
         )?;
 
         log::info!("Estimating values from thermal transfer");
-        let results =
-            auto_tuner.estimate_values_from_thermal_transfer(power, estimated_temperature)?;
+        let results = self.estimate_values_from_thermal_transfer(power, estimated_temperature)?;
 
-        auto_tuner.results = Some(results);
+        self.results = Some(results);
 
-        auto_tuner.print_results();
+        self.print_results();
 
         Ok(())
     }

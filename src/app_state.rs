@@ -1,4 +1,4 @@
-use crate::board::{Action, Board, Reading};
+use crate::board::{self, Action, Board, Reading};
 use crate::state_machines::{
     operational_fsm::{OperationalState, Transitions},
     system_fsm::SystemState,
@@ -8,16 +8,17 @@ use std::default::Default;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
-pub struct System<'a> {
+pub struct System {
     pub system_state: Arc<Mutex<SystemState>>,
     pub operational_state: Arc<Mutex<OperationalState>>,
-    pub board: Arc<Mutex<Board<'a>>>,
+    pub board: Arc<Mutex<Board<'static>>>,
 }
 
-impl<'a> System<'a> {
-    pub fn new() -> Self {
+impl System {
+    pub fn new() -> (Self, board::Element) {
         let operational_state = Arc::new(Mutex::new(OperationalState::default()));
-        let board = Arc::new(Mutex::new(Board::new(operational_state.clone())));
+        let (board, element) = Board::new(operational_state.clone());
+        let board = Arc::new(Mutex::new(board));
 
         // [ ] review this, but for now hit the steam button during startup to initiate auto-tune
         if let Reading::SteamSwitchState(Some(true)) =
@@ -35,11 +36,14 @@ impl<'a> System<'a> {
                 .expect("Failed to set operational state");
         }
 
-        System {
-            system_state: Arc::new(Mutex::new(SystemState::default())),
-            operational_state,
-            board,
-        }
+        (
+            System {
+                system_state: Arc::new(Mutex::new(SystemState::default())),
+                operational_state,
+                board,
+            },
+            element,
+        )
     }
 
     pub fn execute_board_action(&self, action: Action) -> Result<(), String> {

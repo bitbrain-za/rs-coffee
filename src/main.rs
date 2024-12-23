@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 mod app_state;
 mod board;
+mod components;
 mod config;
 mod gpio;
 mod indicator;
@@ -38,12 +39,17 @@ fn main() -> Result<()> {
     #[cfg(feature = "simulate")]
     {
         log::info!("Running simulation");
-        if let Err(e) = models::auto_tune::HeuristicAutoTuner::auto_tune() {
+        let mut auto_tuner =
+            models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000));
+        if let Err(e) = auto_tuner.auto_tune() {
             log::error!("{:?}", e);
         }
     }
+    loop {
+        thread::sleep(Duration::from_secs(1));
+    }
 
-    let system = System::new();
+    let (system, element) = System::new();
     {
         let board = system.board.lock().unwrap();
         *board.outputs.boiler_duty_cycle.lock().unwrap() = 0.5;
@@ -58,6 +64,13 @@ fn main() -> Result<()> {
         .unwrap()
         .transition(SystemTransition::Idle)
         .expect("Invalid transition :(");
+
+    let mut boiler = components::boiler::Boiler::new(system.clone());
+    boiler.set(components::boiler::Mode::BangBang {
+        upper_threshold: 95.0,
+        lower_threshold: 85.0,
+    });
+    boiler.start(element);
 
     let mut loop_interval = Duration::from_millis(1000);
     loop {
@@ -153,10 +166,13 @@ fn main() -> Result<()> {
                             .execute_board_action(Action::OpenValve(Some(Duration::from_secs(5))));
                     }
                     if button == board::ButtonEnum::HotWater {
-                        system.error("Dummy error".to_string());
+                        boiler.set(components::boiler::Mode::BangBang {
+                            upper_threshold: 95.0,
+                            lower_threshold: 85.0,
+                        });
                     }
                     if button == board::ButtonEnum::Steam {
-                        system.panic("Dummy panic".to_string());
+                        boiler.set(components::boiler::Mode::Off);
                     }
                 }
             }

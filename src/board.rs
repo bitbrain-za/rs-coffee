@@ -1,10 +1,16 @@
 use crate::config;
 use crate::gpio::{
-    adc::Adc, button::Button, pwm::PwmBuilder, relay::Relay, relay::State as RelayState,
+    adc::Adc,
+    button::Button,
+    pwm::{Pwm, PwmBuilder},
+    relay::Relay,
+    relay::State as RelayState,
 };
 use crate::indicator::ring::{Ring, State as IndicatorState};
+use crate::sensors::pressure::SeeedWaterPressureSensor;
+#[cfg(not(feature = "simulate"))]
+use crate::sensors::pt100::Pt100;
 use crate::sensors::scale::Scale as LoadCell;
-use crate::sensors::{pressure::SeeedWaterPressureSensor, pt100::Pt100};
 use crate::state_machines::{
     operational_fsm::{OperationalState, Transitions},
     ArcMutexState,
@@ -13,11 +19,13 @@ use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
 };
-use esp_idf_svc::hal::gpio::{Gpio15, Gpio6, Gpio7, InputPin, OutputPin};
+use esp_idf_svc::hal::gpio::{Gpio12, Gpio15, Gpio6, Gpio7, InputPin, OutputPin};
 use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
+
+pub type Element = Pwm<'static, Gpio12>;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ButtonEnum {
@@ -104,21 +112,31 @@ impl Scale {
 
 #[derive(Default)]
 pub struct Temperature {
+    #[cfg(not(feature = "simulate"))]
     degrees: Arc<Mutex<f32>>,
+    #[cfg(feature = "simulate")]
+    pub degrees: Arc<Mutex<f32>>,
 }
 
 impl Temperature {
     pub fn get_temperature(&self) -> f32 {
         *self.degrees.lock().unwrap()
     }
+    #[cfg(feature = "simulate")]
+    pub fn set_temperature(&self, degrees: f32) {
+        *self.degrees.lock().unwrap() = degrees;
+    }
+    #[cfg(not(feature = "simulate"))]
     pub fn set_temperature(
         &self,
         voltage: f32,
         probe: impl crate::sensors::traits::TemperatureProbe,
     ) {
-        *self.degrees.lock().unwrap() = probe
-            .convert_voltage_to_degrees(voltage)
-            .expect("Failed to convert voltage to degrees");
+        {
+            *self.degrees.lock().unwrap() = probe
+                .convert_voltage_to_degrees(voltage)
+                .expect("Failed to convert voltage to degrees");
+        }
     }
 }
 
@@ -178,7 +196,7 @@ pub struct Board<'a> {
 }
 
 impl<'a> Board<'a> {
-    pub fn new(operational_state: Arc<Mutex<OperationalState>>) -> Self {
+    pub fn new(operational_state: Arc<Mutex<OperationalState>>) -> (Self, Element) {
         operational_state
             .transition(Transitions::StartingUpStage("Board Setup".to_string()))
             .expect("Failed to set operational state");
@@ -242,10 +260,12 @@ impl<'a> Board<'a> {
         let pressure = Arc::new(Mutex::new(Pressure::default()));
         let temperature = Arc::new(Mutex::new(Temperature::default()));
         let pressure_clone = pressure.clone();
+        #[cfg(not(feature = "simulate"))]
         let temperature_clone = temperature.clone();
 
         use crate::kv_store::Storable;
         let seed_pressure_probe = SeeedWaterPressureSensor::load_or_default();
+        #[cfg(not(feature = "simulate"))]
         let pt100 = Pt100::load_or_default();
 
         log::info!("Setting up scale");
@@ -307,6 +327,15 @@ impl<'a> Board<'a> {
                         }
                     }
 
+                    #[cfg(feature = "simulate")]
+                    if let Some((_, pressure)) = adc.read() {
+                        pressure_clone
+                            .lock()
+                            .unwrap()
+                            .set_pressure(pressure, seed_pressure_probe);
+                    }
+
+                    #[cfg(not(feature = "simulate"))]
                     if let Some((temperature, pressure)) = adc.read() {
                         temperature_clone
                             .lock()
@@ -330,21 +359,20 @@ impl<'a> Board<'a> {
 
         let boiler_duty_cycle = Arc::new(Mutex::new(0.0));
         let pump_duty_cycle = Arc::new(Mutex::new(0.0));
-        let boiler_duty_cycle_clone = boiler_duty_cycle.clone();
         let pump_duty_cycle_clone = pump_duty_cycle.clone();
         let solenoid_state = Arc::new(Mutex::new(RelayState::Off));
         let solenoid_state_clone = solenoid_state.clone();
         let outputs_killswitch = Arc::new(Mutex::new(false));
         let outputs_killswitch_clone = outputs_killswitch.clone();
 
+        let element: Element = PwmBuilder::new()
+            .with_interval(config::BOILER_PWM_PERIOD)
+            .with_pin(peripherals.pins.gpio12)
+            .build();
+
         let output_thread_handle = std::thread::Builder::new()
             .name("Outputs".to_string())
             .spawn(move || {
-                let mut boiler = PwmBuilder::new()
-                    .with_interval(config::BOILER_PWM_PERIOD)
-                    .with_pin(peripherals.pins.gpio12)
-                    .build();
-
                 let mut pump = PwmBuilder::new()
                     .with_interval(config::PUMP_PWM_PERIOD)
                     .with_pin(peripherals.pins.gpio14)
@@ -358,14 +386,6 @@ impl<'a> Board<'a> {
                         return;
                     }
                     let mut next_tick: Vec<Duration> = vec![config::OUTPUT_POLL_INTERVAL];
-
-                    let requested_boiler_duty_cycle = *boiler_duty_cycle_clone.lock().unwrap();
-                    if boiler.get_duty_cycle() != requested_boiler_duty_cycle {
-                        boiler.set_duty_cycle(requested_boiler_duty_cycle);
-                    }
-                    if let Some(duration) = boiler.tick() {
-                        next_tick.push(duration);
-                    }
 
                     let requested_pump_duty_cycle = *pump_duty_cycle_clone.lock().unwrap();
                     if pump.get_duty_cycle() != requested_pump_duty_cycle {
@@ -394,32 +414,35 @@ impl<'a> Board<'a> {
             })
             .expect("Failed to spawn output thread");
 
-        Board {
-            indicators: Indicators {
-                state: indicator_ring,
-                handle: indicator_handle,
-                kill_switch: indicator_killswitch,
-            },
-            sensors: Sensors {
-                buttons: Buttons {
-                    brew_button: button_brew,
-                    steam_button: button_steam,
-                    hot_water_button: button_hot_water,
+        (
+            Board {
+                indicators: Indicators {
+                    state: indicator_ring,
+                    handle: indicator_handle,
+                    kill_switch: indicator_killswitch,
                 },
-                scale: Scale { weight },
-                handle: sensor_handle,
-                kill_switch: sensor_killswitch,
-                temperature,
-                pressure,
+                sensors: Sensors {
+                    buttons: Buttons {
+                        brew_button: button_brew,
+                        steam_button: button_steam,
+                        hot_water_button: button_hot_water,
+                    },
+                    scale: Scale { weight },
+                    handle: sensor_handle,
+                    kill_switch: sensor_killswitch,
+                    temperature,
+                    pressure,
+                },
+                outputs: Outputs {
+                    boiler_duty_cycle,
+                    pump_duty_cycle,
+                    solenoid: solenoid_state,
+                    handle: output_thread_handle,
+                    kill_switch: outputs_killswitch,
+                },
             },
-            outputs: Outputs {
-                boiler_duty_cycle,
-                pump_duty_cycle,
-                solenoid: solenoid_state,
-                handle: output_thread_handle,
-                kill_switch: outputs_killswitch,
-            },
-        }
+            element,
+        )
     }
 
     pub fn open_valve(&self, duration: Option<Duration>) {
@@ -431,7 +454,7 @@ impl<'a> Board<'a> {
 }
 
 pub enum Action {
-    SetBoialerDutyCycle(f32),
+    SetBoilerDutyCycle(f32),
     SetPumpDutyCycle(f32),
     OpenValve(Option<Duration>),
     CloseValve(Option<Duration>),
@@ -444,7 +467,7 @@ impl Action {
     pub fn execute(&self, board: Arc<Mutex<Board>>) {
         let board = board.lock().unwrap();
         match self {
-            Action::SetBoialerDutyCycle(duty_cycle) => {
+            Action::SetBoilerDutyCycle(duty_cycle) => {
                 *board.outputs.boiler_duty_cycle.lock().unwrap() = *duty_cycle;
             }
             Action::SetPumpDutyCycle(duty_cycle) => {
@@ -510,7 +533,6 @@ pub enum F32Read {
     BoilerTemperature,
     PumpPressure,
     ScaleWeight,
-    BoilerDutyCycle,
     PumpDutyCycle,
 }
 
@@ -523,7 +545,6 @@ impl F32Read {
             }
             F32Read::PumpPressure => board.sensors.pressure.lock().unwrap().get_pressure(),
             F32Read::ScaleWeight => board.sensors.scale.get_weight(),
-            F32Read::BoilerDutyCycle => *board.outputs.boiler_duty_cycle.lock().unwrap(),
             F32Read::PumpDutyCycle => *board.outputs.pump_duty_cycle.lock().unwrap(),
         }
     }
