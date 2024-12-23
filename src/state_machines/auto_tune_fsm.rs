@@ -81,8 +81,7 @@ impl<'a> AutoTuner<'a> {
                     return None;
                 }
 
-                let power =
-                    self.system.read_f32(F32Read::BoilerDutyCycle) * config::BOILER_POWER as f32;
+                let power = self.system.read_f32(F32Read::BoilerDutyCycle) * config::BOILER_POWER;
                 let boiler_temperature = self.system.read_f32(F32Read::BoilerTemperature);
                 self.data_points.push(DataPoint {
                     time: Instant::now(),

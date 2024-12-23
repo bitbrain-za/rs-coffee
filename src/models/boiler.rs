@@ -1,13 +1,13 @@
 use crate::config;
 use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct BoilerModelParameters {
     pub thermal_mass: f32,
     pub ambient_transfer_coefficient: f32,
-    pub probe_transfer_coefficient: f32,
+    pub probe_responsiveness: f32,
 }
 
 impl Default for BoilerModelParameters {
@@ -15,8 +15,18 @@ impl Default for BoilerModelParameters {
         Self {
             thermal_mass: 1255.8,
             ambient_transfer_coefficient: 0.8,
-            probe_transfer_coefficient: 0.0125,
+            probe_responsiveness: 0.0125,
         }
+    }
+}
+
+impl std::fmt::Display for BoilerModelParameters {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Thermal Mass: {}\nAmbient Transfer Coefficient: {}\nProbe Responsiveness: {}\n",
+            self.thermal_mass, self.ambient_transfer_coefficient, self.probe_responsiveness
+        )
     }
 }
 
@@ -47,28 +57,18 @@ impl Storable for BoilerModelParameters {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct TuningDataPoint {
-    time: Instant,
-    power: f32,
-    ambient_temperature: f32,
-    boiler_temperature: f32,
-    probe_temperature: f32,
-}
-
+#[derive(Default)]
 pub struct BoilerModel {
-    parameters: BoilerModelParameters,
+    pub parameters: BoilerModelParameters,
+    pub max_power: f32,
 
     // manipulated variable
-    max_power: u16,
     flow_rate_kg_per_sec: f32,
 
     // process variables
-    probe_temperature: f32,
+    pub probe_temperature: f32,
     boiler_temperature: f32,
-    ambient_temperature: f32,
-
-    tuning_data: Vec<TuningDataPoint>,
+    pub ambient_temperature: f32,
 }
 
 impl BoilerModel {
@@ -78,16 +78,28 @@ impl BoilerModel {
             parameters: BoilerModelParameters::load_or_default(),
 
             flow_rate_kg_per_sec: 0.0,
+
             probe_temperature: initial_temperature.unwrap_or(config::INITIAL_TEMPERATURE),
             boiler_temperature: initial_temperature.unwrap_or(config::INITIAL_TEMPERATURE),
             ambient_temperature: initial_temperature.unwrap_or(config::INITIAL_TEMPERATURE),
-
-            tuning_data: Vec::new(),
         }
     }
 
     pub fn set_flow_rate_ml_per_sec(&mut self, flow_rate: f32) {
         self.flow_rate_kg_per_sec = flow_rate / 1000.0;
+    }
+
+    #[cfg(feature = "simulate")]
+    pub fn get_noisy_probe(&self) -> f32 {
+        use rand::prelude::*;
+        let distribution = rand_distr::Normal::new(0.0, 1.0).unwrap();
+        let noise: f32 = distribution.sample(&mut thread_rng()) / 10.0;
+        self.probe_temperature + noise
+    }
+
+    #[cfg(feature = "simulate")]
+    pub fn get_actual_temperature(&self) -> f32 {
+        self.boiler_temperature
     }
 
     pub fn predict_change(
@@ -112,8 +124,8 @@ impl BoilerModel {
         let delta_boiler = d_temp_d_time_boiler * dt.as_secs_f32();
 
         // Probe temperature change (dependent on boiler temperature)
-        let d_temp_d_time_probe = self.parameters.probe_transfer_coefficient
-            * (self.boiler_temperature - probe_temperature);
+        let d_temp_d_time_probe =
+            self.parameters.probe_responsiveness * (self.boiler_temperature - probe_temperature);
         let delta_probe = d_temp_d_time_probe * dt.as_secs_f32();
 
         (
@@ -122,51 +134,15 @@ impl BoilerModel {
         )
     }
 
-    pub fn update(&mut self, power: f32, ambient_temperature: f32, dt: Duration) -> (f32, f32) {
+    pub fn update(&mut self, power: f32, dt: Duration) -> (f32, f32) {
         (self.boiler_temperature, self.ambient_temperature) = self.predict_change(
             self.boiler_temperature,
             self.probe_temperature,
             power,
-            ambient_temperature,
+            self.ambient_temperature,
             dt,
         );
 
         (self.boiler_temperature, self.probe_temperature)
-    }
-
-    pub fn simulate(
-        &mut self,
-        power: &[f32],
-        ambient_temperature: f32,
-        interval: &[Duration],
-    ) -> Vec<(f32, f32)> {
-        assert_eq!(power.len(), interval.len());
-
-        power
-            .iter()
-            .zip(interval.iter())
-            .map(|(p, interval)| self.update(*p, ambient_temperature, *interval))
-            .collect()
-    }
-
-    pub fn capture_tuning_point(&mut self, power: f32) {
-        self.tuning_data.push(TuningDataPoint {
-            time: Instant::now(),
-            power,
-            ambient_temperature: self.ambient_temperature,
-            boiler_temperature: self.boiler_temperature,
-            probe_temperature: self.probe_temperature,
-        });
-    }
-
-    pub fn start_tuning(&mut self) {
-        self.tuning_data.clear();
-    }
-
-    pub fn stop_tuning(&mut self) -> Vec<TuningDataPoint> {
-        let data = self.tuning_data.clone();
-        self.tuning_data.clear();
-
-        data
     }
 }

@@ -18,7 +18,8 @@ debug = true    # Symbols are nice and they don't increase the size on Flash
 opt-level = "z"
 
 [features]
-default = ["std", "embassy", "esp-idf-svc/native"]
+default = ["std", "embassy", "esp-idf-svc/native", "simulate"]
+simulate = ["dep:rand", "dep:rand_distr"]
 
 pio = ["esp-idf-svc/pio"]
 std = ["alloc", "esp-idf-svc/binstart", "esp-idf-svc/std"]
@@ -48,11 +49,8 @@ loadcell = "0.2.0"
 postcard = "1"
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false, features = ["alloc"] }
-ndarray = "0.15.6"
-argmin = "0.10.0"
-argmin-math = { version = "0.4.0", features = ["ndarray_v0_15-nolinalg"] }
-rand = "0.8.4"
-rand_distr = "0.4.2"
+rand = { version = "0.8.4", optional = true }
+rand_distr = { version = "0.4.2", optional = true }
 
 [build-dependencies]
 embuild = "0.32.0"
