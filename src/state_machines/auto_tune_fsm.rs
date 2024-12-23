@@ -40,7 +40,7 @@ impl Iterator for State {
     }
 }
 
-pub struct AutoTuner<'a> {
+pub struct AutoTuner {
     state: State,
     setpoint: f32,
     boiler_model: BoilerModel,
@@ -50,11 +50,11 @@ pub struct AutoTuner<'a> {
     delta_time: Duration,
     data_points: Vec<DataPoint>,
     next_reading: Instant,
-    system: System<'a>,
+    system: System,
 }
 
-impl<'a> AutoTuner<'a> {
-    pub fn new(setpoint: f32, system: System<'a>) -> Self {
+impl AutoTuner {
+    pub fn new(setpoint: f32, system: System) -> Self {
         Self {
             state: State::Setup,
             setpoint,
@@ -80,31 +80,6 @@ impl<'a> AutoTuner<'a> {
                 if self.next_reading > Instant::now() {
                     return None;
                 }
-
-                let power = self.system.read_f32(F32Read::BoilerDutyCycle) * config::BOILER_POWER;
-                let boiler_temperature = self.system.read_f32(F32Read::BoilerTemperature);
-                self.data_points.push(DataPoint {
-                    time: Instant::now(),
-                    power,
-                    probe_temperature: boiler_temperature,
-                });
-
-                let mut dc = if boiler_temperature > self.setpoint {
-                    1.0
-                } else {
-                    0.0
-                };
-
-                if self.start_time.elapsed() >= self.duration {
-                    dc = 0.0;
-                    self.state = State::AnalyzingData;
-                }
-
-                self.system
-                    .execute_board_action(Action::SetBoialerDutyCycle(dc))
-                    .expect("Failed to set boiler duty cycle");
-
-                self.next_reading = Instant::now() + self.delta_time;
 
                 None
             }

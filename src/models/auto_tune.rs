@@ -42,19 +42,11 @@ enum Step {
     Done,
 }
 
-enum AmbientMeasurementSteps {
-    Setup,
-    Sample1,
-    WaitUntil(Instant),
-    Sample2,
-    Done(f32),
-}
-
 #[derive(Default)]
 enum Mode {
     #[default]
     Setup,
-    Ambient(AmbientMeasurementSteps),
+    Ambient(Step),
     Heatup(Step),
     Settle(Step),
     Transfer(Step),
@@ -151,8 +143,7 @@ impl HeuristicAutoTuner {
         duration: Duration,
         max_delta: f32,
         timeout: Option<Duration>,
-        state: AmbientMeasurementSteps,
-    ) -> Result<AmbientMeasurementSteps, Error> {
+    ) -> Result<f32, Error> {
         let mut retries = timeout.map(|t| t.as_millis() / duration.as_millis());
 
         loop {
@@ -501,13 +492,13 @@ impl HeuristicAutoTuner {
             match self.mode {
                 Mode::Setup => {
                     log::info!("Setting up");
-                    self.mode = Mode::Ambient(AmbientMeasurementSteps::Setup);
+                    self.mode = Mode::Ambient(Step::Setup);
                 }
-                Mode::Ambient(AmbientMeasurementSteps::Setup) => {
+                Mode::Ambient(Step::Setup) => {
                     log::info!("Measuring ambient temperature");
-                    self.mode = Mode::Ambient(AmbientMeasurementSteps::Sample1);
+                    self.mode = Mode::Ambient(Step::Run);
                 }
-                Mode::Ambient(step) => {
+                Mode::Ambient(Step::Run) => {
                     log::info!("Measuring ambient temperature");
                     self.measure_ambient(Duration::from_secs(60), 1.0, None)?;
                     log::debug!(
