@@ -33,11 +33,43 @@ fn convert_to_normal_time_secs_f32(duration: Duration) -> f32 {
 
     duration.as_secs_f32() / TIME_DILATION_FACTOR
 }
+
 fn elapsed_as_secs_f32_with_dilation(instant: Instant) -> f32 {
     instant.elapsed().as_secs_f32() / TIME_DILATION_FACTOR
 }
 
-#[derive(Default, PartialEq)]
+#[derive(Default)]
+pub enum HeuristicAutoTunerState {
+    #[default]
+    Init,
+    MeasureAmbient,
+    MeasureHeatingUp(HeatupTest),
+    MeasureSteadyState(AmbientTransferTest),
+    Done,
+}
+
+impl PartialEq for HeuristicAutoTunerState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (HeuristicAutoTunerState::Init, HeuristicAutoTunerState::Init) => true,
+            (HeuristicAutoTunerState::MeasureAmbient, HeuristicAutoTunerState::MeasureAmbient) => {
+                true
+            }
+            (
+                HeuristicAutoTunerState::MeasureHeatingUp(_),
+                HeuristicAutoTunerState::MeasureHeatingUp(_),
+            ) => true,
+            (
+                HeuristicAutoTunerState::MeasureSteadyState(_),
+                HeuristicAutoTunerState::MeasureSteadyState(_),
+            ) => true,
+            (HeuristicAutoTunerState::Done, HeuristicAutoTunerState::Done) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Default, PartialEq, Copy, Clone)]
 enum SettlingState {
     #[default]
     Init,
@@ -53,7 +85,7 @@ struct DifferentialData {
     time: Option<Instant>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Error {
     TemperatureNotStable,
     TemperatureOutOfBounds(String),
@@ -83,12 +115,14 @@ enum Mode {
 
 #[derive(Default)]
 pub struct HeuristicAutoTuner {
+    state: HeuristicAutoTunerState,
     sample_time: Duration,
     ambient_temperature: Option<f32>,
     boiler_simulator: BoilerModel,
     results: Option<BoilerModelParameters>,
     ambient_measurement: AmbientTest,
     settling_state: SettlingState,
+    current_power: f32,
 }
 
 pub struct AmbientTest {
@@ -351,7 +385,16 @@ impl HeatupTest {
     }
 }
 
+#[derive(Default, Copy, Clone)]
+enum SettleMode {
+    #[default]
+    None,
+    Time(Duration),
+    Value(f32),
+}
+
 struct AmbientTransferTest {
+    state: AmbientTransferTestState,
     heatup_test_data: HeatupTestData,
 
     mpc: BoilerModelParameters,
@@ -362,16 +405,32 @@ struct AmbientTransferTest {
 
     last_test_instant: Instant,
     test_duration: Duration,
-    settle_time: Duration,
+    settle_mode: SettleMode,
 
     start_time: Option<Instant>,
     accumulation_time_s: f32,
 }
 
+#[derive(Clone)]
 enum AmbientTransferTestState {
+    Init,
+    Settling(SettlingState),
     Busy,
     Done(f32),
     Err(Error),
+}
+
+impl PartialEq for AmbientTransferTestState {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (AmbientTransferTestState::Init, AmbientTransferTestState::Init) => true,
+            (AmbientTransferTestState::Settling(_), AmbientTransferTestState::Settling(_)) => true,
+            (AmbientTransferTestState::Busy, AmbientTransferTestState::Busy) => true,
+            (AmbientTransferTestState::Done(_), AmbientTransferTestState::Done(_)) => true,
+            (AmbientTransferTestState::Err(_), AmbientTransferTestState::Err(_)) => true,
+            _ => false,
+        }
+    }
 }
 
 impl AmbientTransferTest {
@@ -379,6 +438,7 @@ impl AmbientTransferTest {
         let mut data = data;
         let (target, mpc) = data.estimate_values_from_heatup(ambient_temperature)?;
         Ok(Self {
+            state: AmbientTransferTestState::Init,
             heatup_test_data: data,
             mpc,
             target,
@@ -387,7 +447,7 @@ impl AmbientTransferTest {
 
             last_test_instant: Instant::now(),
             test_duration: Duration::from_secs(500),
-            settle_time: Duration::from_secs(0),
+            settle_mode: SettleMode::None,
 
             start_time: None,
             total_energy: 0.0,
@@ -397,22 +457,93 @@ impl AmbientTransferTest {
         convert_to_dilated_time(self.test_duration)
     }
     fn get_dilated_settle_time(&self) -> Duration {
-        convert_to_dilated_time(self.settle_time)
+        if let SettleMode::Time(duration) = self.settle_mode {
+            convert_to_dilated_time(duration)
+        } else {
+            Duration::from_secs(0)
+        }
     }
 
-    fn start(&mut self, test_duration: Duration, settle_time: Duration) {
-        self.test_duration = test_duration + settle_time;
-        self.settle_time = settle_time;
+    fn start(&mut self, test_duration: Duration, settle_mode: SettleMode) {
+        self.test_duration = test_duration;
+        self.state = AmbientTransferTestState::Init;
+        match settle_mode {
+            SettleMode::Time(settle_time) => {
+                self.test_duration = test_duration + settle_time;
+            }
+            SettleMode::Value(_) => {
+                self.state = AmbientTransferTestState::Settling(SettlingState::Init);
+            }
+            SettleMode::None => {}
+        };
+        self.settle_mode = settle_mode;
+    }
+
+    fn settle_down(&mut self, current_temperature: f32) {
+        let test_state = self.state.clone();
+        let next = match (test_state, self.settle_mode) {
+            (AmbientTransferTestState::Settling(settling_state), SettleMode::Value(target)) => {
+                let next_settling_state = match settling_state {
+                    SettlingState::Init => {
+                        if current_temperature > target {
+                            SettlingState::Cooling
+                        } else {
+                            SettlingState::Heating
+                        }
+                    }
+                    SettlingState::Cooling => {
+                        if current_temperature <= target {
+                            SettlingState::Done
+                        } else {
+                            SettlingState::Cooling
+                        }
+                    }
+                    SettlingState::Heating => {
+                        if current_temperature > target + 0.5 {
+                            SettlingState::Cooling
+                        } else {
+                            SettlingState::Heating
+                        }
+                    }
+                    SettlingState::Done => SettlingState::Done,
+                };
+                if next_settling_state == SettlingState::Done {
+                    AmbientTransferTestState::Init
+                } else {
+                    AmbientTransferTestState::Settling(next_settling_state)
+                }
+            }
+            _ => {
+                (log::error!("Really shouldn't be able to get here"));
+                AmbientTransferTestState::Err(Error::UnableToPerformTest(
+                    "Sic hunt draconis".to_string(),
+                ))
+            }
+        };
+        self.state = next;
     }
 
     fn measure(&mut self, heater_power: f32, current_temperature: f32) -> AmbientTransferTestState {
-        if self.start_time.is_none() {
+        if self.state == AmbientTransferTestState::Init {
             self.previous_temperature = current_temperature;
             self.start_time = Some(Instant::now());
             self.last_test_instant = Instant::now();
             self.accumulation_time_s = 0.0;
             self.total_energy = 0.0;
             return AmbientTransferTestState::Busy;
+        }
+
+        if let AmbientTransferTestState::Settling(state) = self.state {
+            if state != SettlingState::Done {
+                self.settle_down(current_temperature);
+                return AmbientTransferTestState::Busy;
+            } else {
+                self.state = AmbientTransferTestState::Busy;
+            }
+        }
+
+        if let AmbientTransferTestState::Err(_) = self.state {
+            return self.state.clone();
         }
 
         let start_time = self.start_time.unwrap();
@@ -432,6 +563,7 @@ impl AmbientTransferTest {
             log::debug!("Total energy: {}", self.total_energy);
             self.test_duration = Duration::from_secs_f32(self.accumulation_time_s);
             log::debug!("Test duration: {}", self.test_duration.as_secs_f32());
+            self.state = AmbientTransferTestState::Done(self.power());
             return AmbientTransferTestState::Done(self.power());
         }
         self.previous_temperature = current_temperature;
@@ -585,6 +717,129 @@ impl HeuristicAutoTuner {
         }
     }
 
+    pub fn run(&mut self) -> Result<Option<BoilerModelParameters>, Error> {
+        let dt = self.sample_time;
+
+        let current_temperature = self.get_probe();
+        let next_state = match self.state {
+            HeuristicAutoTunerState::Init => {
+                self.results = None;
+                log::info!("Measuring ambient temperature");
+                self.ambient_measurement
+                    .start(Duration::from_secs(60), None, self.get_probe());
+
+                self.current_power = 0.0;
+                Some(HeuristicAutoTunerState::MeasureAmbient)
+            }
+            HeuristicAutoTunerState::MeasureAmbient => {
+                match self.ambient_measurement.sample(self.get_probe()) {
+                    AmbientMeasurementState::Done(ambient_temperature) => {
+                        self.ambient_temperature = Some(ambient_temperature);
+                        #[cfg(feature = "simulate")]
+                        {
+                            self.boiler_simulator.ambient_temperature = ambient_temperature;
+                        }
+                        log::debug!(
+                            "Ambient Temperature = {}",
+                            self.boiler_simulator.ambient_temperature
+                        );
+
+                        log::debug!("Measuring Heatup");
+                        let mut heatup_test = HeatupTest {
+                            sample_time: self.sample_time,
+                            ..Default::default()
+                        };
+                        heatup_test.start(current_temperature, TARGET_TEMPERATURE);
+                        self.current_power = HEATER_MAX_POWER;
+                        Some(HeuristicAutoTunerState::MeasureHeatingUp(heatup_test))
+                    }
+                    AmbientMeasurementState::Err(e) => return Err(e),
+                    _ => None,
+                }
+            }
+            HeuristicAutoTunerState::MeasureHeatingUp(ref mut test) => {
+                match test.measure(current_temperature) {
+                    HeatupTestState::Done(mut heatup_results) => {
+                        let (estimated_temperature, _mpc) = heatup_results
+                            .estimate_values_from_heatup(self.ambient_temperature.unwrap())?;
+                        let mut ambient_transfer_test = AmbientTransferTest::new(
+                            heatup_results,
+                            self.ambient_temperature.unwrap(),
+                        )?;
+                        self.current_power = 0.0;
+                        ambient_transfer_test.start(
+                            Duration::from_secs(500),
+                            SettleMode::Value(estimated_temperature),
+                        );
+
+                        log::debug!("Running Steady State test");
+                        Some(HeuristicAutoTunerState::MeasureSteadyState(
+                            ambient_transfer_test,
+                        ))
+                    }
+                    HeatupTestState::Err(e) => return Err(e),
+                    _ => None,
+                }
+            }
+
+            HeuristicAutoTunerState::MeasureSteadyState(ref mut test) => {
+                match test.measure(self.current_power, current_temperature) {
+                    AmbientTransferTestState::Done(test_power) => {
+                        log::debug!("Power: {}", test_power);
+
+                        log::info!("Estimating values from thermal transfer");
+                        let results = test.estimate_values_from_thermal_transfer(
+                            self.ambient_temperature.unwrap(),
+                        )?;
+
+                        self.results = Some(results);
+                        self.print_results();
+
+                        Some(HeuristicAutoTunerState::Done)
+                    }
+                    AmbientTransferTestState::Err(e) => return Err(e),
+                    _ => {
+                        // [ ] just bitbang for now. In the real implementation, activate MPC with the estimated values
+                        self.current_power = if current_temperature >= test.target {
+                            0.0
+                        } else {
+                            TRANSFER_TEST_HEATER_POWER
+                        };
+                        None
+                    }
+                }
+            }
+            HeuristicAutoTunerState::Done => None,
+        };
+        FreeRtos::delay_ms((1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32);
+        log::trace!(
+            "Updating boiler simulator with power: {}, for {:.2}s",
+            self.current_power,
+            dt.as_secs_f32()
+        );
+        self.boiler_simulator.update(self.current_power, dt);
+
+        if let Some(state) = next_state {
+            self.state = state;
+        }
+        if self.state == HeuristicAutoTunerState::Done {
+            log::info!("Autotune Completed!");
+            self.print_results();
+        }
+        Ok(self.results)
+    }
+
+    pub fn simulate(&mut self) -> Result<(), Error> {
+        loop {
+            if let Some(rees) = self.run()? {
+                log::info!("Simulation completed");
+                log::info!("Results: {:?}", rees);
+                break;
+            }
+        }
+        Ok(())
+    }
+
     pub fn auto_tune(&mut self) -> Result<(), Error> {
         log::info!("Measuring ambient temperature");
         self.ambient_measurement
@@ -675,7 +930,10 @@ impl HeuristicAutoTuner {
         }
 
         log::info!("Measuring ambient transfer");
-        ambient_transfer_test.start(Duration::from_secs(500), Duration::from_secs(30));
+        ambient_transfer_test.start(
+            Duration::from_secs(500),
+            SettleMode::Value(estimated_temperature),
+        );
 
         let mut power = 0.0;
         loop {
