@@ -12,8 +12,6 @@ const TIME_DILATION_FACTOR: f32 = 0.01;
 #[cfg(not(feature = "simulate"))]
 const TIME_DILATION_FACTOR: f32 = 1.0;
 
-const SAMPLE_TIME: Duration = Duration::from_secs(1);
-
 fn convert_to_dilated_time(duration: Duration) -> Duration {
     #[cfg(not(feature = "simulate"))]
     return duration;
@@ -22,12 +20,30 @@ fn convert_to_dilated_time(duration: Duration) -> Duration {
     Duration::from_secs_f32(s)
 }
 
-fn convert_to_normal_time(duration: Duration) -> Duration {
+fn convert_to_dilated_time_secs_f32(duration: Duration) -> f32 {
     #[cfg(not(feature = "simulate"))]
-    return duration;
+    return duration.as_secs_f32();
 
-    let s = duration.as_secs_f32() / TIME_DILATION_FACTOR;
-    Duration::from_secs_f32(s)
+    duration.as_secs_f32() * TIME_DILATION_FACTOR
+}
+
+fn convert_to_normal_time_secs_f32(duration: Duration) -> f32 {
+    #[cfg(not(feature = "simulate"))]
+    return duration.as_secs_f32();
+
+    duration.as_secs_f32() / TIME_DILATION_FACTOR
+}
+fn elapsed_as_secs_f32_with_dilation(instant: Instant) -> f32 {
+    instant.elapsed().as_secs_f32() / TIME_DILATION_FACTOR
+}
+
+#[derive(Default, PartialEq)]
+enum SettlingState {
+    #[default]
+    Init,
+    Cooling,
+    Heating,
+    Done,
 }
 
 #[derive(Debug, Default)]
@@ -72,6 +88,7 @@ pub struct HeuristicAutoTuner {
     boiler_simulator: BoilerModel,
     results: Option<BoilerModelParameters>,
     ambient_measurement: AmbientTest,
+    settling_state: SettlingState,
 }
 
 pub struct AmbientTest {
@@ -91,7 +108,7 @@ impl Default for AmbientTest {
 }
 
 pub enum AmbientMeasurementState {
-    Busy(Duration),
+    Busy,
     Done(f32),
     Err(Error),
 }
@@ -99,12 +116,12 @@ pub enum AmbientMeasurementState {
 impl AmbientTest {
     pub fn start(
         &mut self,
-        test_duration: Option<Duration>,
+        test_duration: Duration,
         retries: Option<usize>,
         current_temperature: f32,
     ) {
-        self.end_of_settling_time = Instant::now()
-            + test_duration.unwrap_or(Duration::from_secs_f32(60.0 * TIME_DILATION_FACTOR));
+        let test_duration = convert_to_dilated_time(test_duration);
+        self.end_of_settling_time = Instant::now() + test_duration;
 
         self.retries = retries.unwrap_or(0);
         self.initial_sample = current_temperature;
@@ -117,12 +134,12 @@ impl AmbientTest {
             } else if self.retries > 0 {
                 self.retries -= 1;
                 self.end_of_settling_time = Instant::now() + Duration::from_secs(10);
-                AmbientMeasurementState::Busy(Duration::from_secs(10))
+                AmbientMeasurementState::Busy
             } else {
                 AmbientMeasurementState::Err(Error::TemperatureNotStable)
             }
         } else {
-            AmbientMeasurementState::Busy(self.end_of_settling_time - Instant::now())
+            AmbientMeasurementState::Busy
         }
     }
 }
@@ -218,7 +235,7 @@ impl HeatupTestData {
             probe_responsiveness,
         };
 
-        let elapsed_time_heating = self.elapsed_time_heating.as_secs_f32() / TIME_DILATION_FACTOR;
+        let elapsed_time_heating = convert_to_normal_time_secs_f32(self.elapsed_time_heating);
 
         let estimated_temperature = asymptotic_temperature
             + (ambient_temperature - asymptotic_temperature)
@@ -321,7 +338,7 @@ impl HeatupTest {
                     sample_distance: self.sample_distance,
                     power: HEATER_MAX_POWER,
                     time_to_halfway_point: Duration::from_secs_f32(
-                        self.time_to_halfway_point.as_secs_f32() / TIME_DILATION_FACTOR,
+                        convert_to_normal_time_secs_f32(self.time_to_halfway_point),
                     ),
                     elapsed_time_heating,
                 });
@@ -382,9 +399,7 @@ impl AmbientTransferTest {
     fn get_dilated_settle_time(&self) -> Duration {
         convert_to_dilated_time(self.settle_time)
     }
-    fn elapsed_as_secs_f32_with_dilation(instant: Instant) -> f32 {
-        instant.elapsed().as_secs_f32() / TIME_DILATION_FACTOR
-    }
+
     fn start(&mut self, test_duration: Duration, settle_time: Duration) {
         self.test_duration = test_duration + settle_time;
         self.settle_time = settle_time;
@@ -407,7 +422,7 @@ impl AmbientTransferTest {
         let settle_time = self.get_dilated_settle_time();
 
         if elapsed < test_duration && elapsed >= settle_time {
-            let delta_time = Self::elapsed_as_secs_f32_with_dilation(self.last_test_instant);
+            let delta_time = elapsed_as_secs_f32_with_dilation(self.last_test_instant);
             let energy = heater_power * delta_time
                 + (self.previous_temperature - current_temperature) * self.mpc.thermal_mass;
             self.total_energy += energy;
@@ -496,46 +511,38 @@ impl HeuristicAutoTuner {
         }
     }
 
-    pub fn get_probe(&self) -> f32 {
+    fn get_probe(&self) -> f32 {
         // self.boiler_simulator.get_noisy_probe()
         self.boiler_simulator.probe_temperature
     }
 
-    fn settle_down(&mut self, target: f32) {
-        let test_interval = Duration::from_secs(1);
-
-        let mut current_time = Instant::now();
-        let mut next_test_time = current_time + test_interval;
-
-        loop {
-            self.boiler_simulator
-                .update(HEATER_MAX_POWER / 2.0, test_interval);
-            current_time += test_interval;
-
-            if current_time >= next_test_time {
-                let current_temp = self.get_probe();
-                if current_temp > target + 0.5 {
-                    log::debug!("Settling up @ {:?}s", current_time);
-                    break;
-                }
-                next_test_time += test_interval;
-            }
-        }
-        loop {
-            self.boiler_simulator.update(0.0, test_interval);
-            current_time += test_interval;
-
-            if current_time >= next_test_time {
-                let current_temp = self.get_probe();
-                if current_temp <= target {
-                    log::debug!("Settling down @ {:?}s", current_time);
-                    break;
+    fn settle_down(&mut self, target: f32, current_temperature: f32) {
+        let next = match &self.settling_state {
+            SettlingState::Init => {
+                if current_temperature > target {
+                    SettlingState::Cooling
                 } else {
-                    log::trace!("Settling down from {} to {}", current_temp, target);
+                    SettlingState::Heating
                 }
-                next_test_time += test_interval;
             }
-        }
+            SettlingState::Cooling => {
+                if current_temperature <= target {
+                    SettlingState::Done
+                } else {
+                    SettlingState::Cooling
+                }
+            }
+            SettlingState::Heating => {
+                if current_temperature > target + 0.5 {
+                    SettlingState::Cooling
+                } else {
+                    SettlingState::Heating
+                }
+            }
+            SettlingState::Done => SettlingState::Done,
+        };
+
+        self.settling_state = next;
     }
 
     pub fn print_results(&self) {
@@ -580,12 +587,13 @@ impl HeuristicAutoTuner {
 
     pub fn auto_tune(&mut self) -> Result<(), Error> {
         log::info!("Measuring ambient temperature");
-        self.ambient_measurement.start(None, None, self.get_probe());
+        self.ambient_measurement
+            .start(Duration::from_secs(60), None, self.get_probe());
         let dt = self.sample_time;
         loop {
             let power = 0.0;
             FreeRtos::delay_ms(
-                (1000.0 * (self.sample_time.as_secs_f32() * TIME_DILATION_FACTOR)) as u32,
+                (1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32,
             );
             self.boiler_simulator.update(power, dt);
 
@@ -618,7 +626,7 @@ impl HeuristicAutoTuner {
         loop {
             let power = 1000.0;
             FreeRtos::delay_ms(
-                (1000.0 * (self.sample_time.as_secs_f32() * TIME_DILATION_FACTOR)) as u32,
+                (1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32,
             );
             self.boiler_simulator.update(power, dt);
 
@@ -641,7 +649,30 @@ impl HeuristicAutoTuner {
 
         // [ ] when we have MPC control here, set the first tpass values.
         log::info!("Settling down");
-        self.settle_down(ambient_transfer_test.target);
+        self.settling_state = SettlingState::Init;
+        loop {
+            let mut power = 0.0;
+
+            self.settle_down(ambient_transfer_test.target, self.get_probe());
+            match self.settling_state {
+                SettlingState::Cooling => {
+                    power = 0.0;
+                }
+                SettlingState::Heating => {
+                    power = 100.0;
+                }
+                SettlingState::Init => {
+                    log::error!("Really shouldn't be able to get here");
+                }
+                SettlingState::Done => {
+                    break;
+                }
+            }
+            self.boiler_simulator.update(power, dt);
+            FreeRtos::delay_ms(
+                (1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32,
+            );
+        }
 
         log::info!("Measuring ambient transfer");
         ambient_transfer_test.start(Duration::from_secs(500), Duration::from_secs(30));
@@ -650,7 +681,7 @@ impl HeuristicAutoTuner {
         loop {
             self.boiler_simulator.update(power, dt);
             FreeRtos::delay_ms(
-                (1000.0 * (self.sample_time.as_secs_f32() * TIME_DILATION_FACTOR)) as u32,
+                (1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32,
             );
 
             let current_temperature = self.get_probe();
@@ -663,7 +694,7 @@ impl HeuristicAutoTuner {
                 _ => {}
             }
 
-            // just bitbang for now. In the real implementation, activate MPC with the estimated values
+            // [ ] just bitbang for now. In the real implementation, activate MPC with the estimated values
             power = if current_temperature >= estimated_temperature {
                 0.0
             } else {
