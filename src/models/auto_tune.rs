@@ -129,16 +129,17 @@ impl AmbientTest {
 
 #[derive(Default)]
 struct HeatupTest {
-    sample_time: Duration,
+    target: f32,
+
     temperature_samples: Vec<f32>,
     sample_count: usize,
     sample_distance: usize,
+
+    sample_time: Duration,
     time_to_halfway_point: Duration,
-    elapsed_time_heating: Duration,
     differential_data: DifferentialData,
     next_test_time: Option<Instant>,
     test_interval: Duration,
-    target: f32,
     start_time: Option<Instant>,
 }
 
@@ -152,11 +153,11 @@ struct HeatupTestData {
     temperature_samples: Vec<f32>,
     sample_count: usize,
     sample_distance: usize,
-    power: f32,
     time_to_halfway_point: Duration,
+
+    // used?
+    power: f32,
     elapsed_time_heating: Duration,
-    mpc: BoilerModelParameters,
-    estimated_temperature: f32,
 }
 
 impl HeatupTestData {
@@ -211,7 +212,7 @@ impl HeatupTestData {
                     * (-boiler_responsiveness * first_temperature_sample_time).exp()
                     / (s0 - asymptotic_temperature));
 
-        self.mpc = BoilerModelParameters {
+        let mpc = BoilerModelParameters {
             thermal_mass: boiler_thermal_mass,
             ambient_transfer_coefficient,
             probe_responsiveness,
@@ -219,16 +220,16 @@ impl HeatupTestData {
 
         let elapsed_time_heating = self.elapsed_time_heating.as_secs_f32() / TIME_DILATION_FACTOR;
 
-        self.estimated_temperature = asymptotic_temperature
+        let estimated_temperature = asymptotic_temperature
             + (ambient_temperature - asymptotic_temperature)
                 * (-boiler_responsiveness * elapsed_time_heating).exp();
 
-        log::debug!("Estimated temperature: {}", self.estimated_temperature);
-        log::debug!("Estimated values: {:?}", self.mpc);
+        log::debug!("Estimated temperature: {}", estimated_temperature);
+        log::debug!("Estimated values: {:?}", mpc);
         log::debug!("Time to 50%: {:.2}", first_temperature_sample_time);
         log::debug!("Elapsed time heating: {}", elapsed_time_heating);
 
-        Ok((self.estimated_temperature, self.mpc))
+        Ok((estimated_temperature, mpc))
     }
 }
 
@@ -239,12 +240,8 @@ impl HeatupTest {
         } else {
             self.sample_time
         };
-        #[cfg(feature = "simulate")]
-        {
-            let test_interval = self.test_interval.as_secs_f32() * TIME_DILATION_FACTOR;
-            self.test_interval = Duration::from_secs_f32(test_interval);
-        }
 
+        self.test_interval = convert_to_dilated_time(self.test_interval);
         self.sample_count = 0;
         self.sample_distance = 1;
         self.differential_data = DifferentialData::default();
@@ -261,6 +258,7 @@ impl HeatupTest {
 
     fn measure(&mut self, current_temperature: f32) -> HeatupTestState {
         let current_time = Instant::now();
+
         if self.next_test_time.is_none() || self.start_time.is_none() {
             return HeatupTestState::Err(Error::UnableToPerformTest(
                 "Need to start the test first".to_string(),
@@ -306,7 +304,7 @@ impl HeatupTest {
                 self.temperature_samples[self.sample_count] = current_temperature;
                 self.sample_count += 1;
             } else {
-                self.elapsed_time_heating = current_time - start_time;
+                let elapsed_time_heating = current_time - start_time;
 
                 if self.sample_count == 0 {
                     return HeatupTestState::Err(Error::UnableToPerformTest(
@@ -316,7 +314,7 @@ impl HeatupTest {
                     self.sample_count -= 1;
                 }
                 log::trace!("Heatup samples: {:?}", self.temperature_samples);
-                log::trace!("Elapsed time heating: {:?}", self.elapsed_time_heating);
+                log::trace!("Elapsed time heating: {:?}", elapsed_time_heating);
                 return HeatupTestState::Done(HeatupTestData {
                     temperature_samples: self.temperature_samples.clone(),
                     sample_count: self.sample_count,
@@ -325,9 +323,7 @@ impl HeatupTest {
                     time_to_halfway_point: Duration::from_secs_f32(
                         self.time_to_halfway_point.as_secs_f32() / TIME_DILATION_FACTOR,
                     ),
-                    elapsed_time_heating: self.elapsed_time_heating,
-                    mpc: BoilerModelParameters::default(),
-                    estimated_temperature: 0.0,
+                    elapsed_time_heating,
                 });
             }
             self.next_test_time =
@@ -339,13 +335,13 @@ impl HeatupTest {
 }
 
 struct AmbientTransferTest {
-    temperature_samples: Vec<f32>,
-    sample_count: usize,
-    sample_distance: usize,
+    heatup_test_data: HeatupTestData,
+
     mpc: BoilerModelParameters,
+    target: f32,
+
     total_energy: f32,
     previous_temperature: f32,
-    target: f32,
 
     last_test_instant: Instant,
     test_duration: Duration,
@@ -353,46 +349,8 @@ struct AmbientTransferTest {
 
     start_time: Option<Instant>,
     accumulation_time_s: f32,
-
-    //from heatup test
-    time_to_halfway_point: Duration,
 }
 
-impl Default for AmbientTransferTest {
-    fn default() -> Self {
-        Self {
-            temperature_samples: vec![0.0; 16],
-            sample_count: 0,
-            sample_distance: 1,
-            time_to_halfway_point: Duration::from_secs(0),
-            mpc: BoilerModelParameters::default(),
-
-            last_test_instant: Instant::now(),
-            test_duration: Duration::from_secs(500),
-            settle_time: Duration::from_secs(0),
-            accumulation_time_s: 0.0,
-
-            start_time: None,
-            total_energy: 0.0,
-            previous_temperature: 0.0,
-            target: 0.0,
-        }
-    }
-}
-
-impl From<HeatupTestData> for AmbientTransferTest {
-    fn from(data: HeatupTestData) -> Self {
-        Self {
-            mpc: data.mpc,
-            temperature_samples: data.temperature_samples,
-            sample_count: data.sample_count,
-            sample_distance: data.sample_distance,
-            time_to_halfway_point: data.time_to_halfway_point,
-            target: data.estimated_temperature,
-            ..Default::default()
-        }
-    }
-}
 enum AmbientTransferTestState {
     Busy,
     Done(f32),
@@ -400,6 +358,24 @@ enum AmbientTransferTestState {
 }
 
 impl AmbientTransferTest {
+    fn new(data: HeatupTestData, ambient_temperature: f32) -> Result<Self, Error> {
+        let mut data = data;
+        let (target, mpc) = data.estimate_values_from_heatup(ambient_temperature)?;
+        Ok(Self {
+            heatup_test_data: data,
+            mpc,
+            target,
+            accumulation_time_s: 0.0,
+            previous_temperature: 0.0,
+
+            last_test_instant: Instant::now(),
+            test_duration: Duration::from_secs(500),
+            settle_time: Duration::from_secs(0),
+
+            start_time: None,
+            total_energy: 0.0,
+        })
+    }
     fn get_dilated_test_duration(&self) -> Duration {
         convert_to_dilated_time(self.test_duration)
     }
@@ -446,11 +422,11 @@ impl AmbientTransferTest {
         self.previous_temperature = current_temperature;
         self.last_test_instant = Instant::now();
 
-        if self.temperature_samples[2] - 15.0 >= current_temperature {
+        if self.heatup_test_data.temperature_samples[2] - 15.0 >= current_temperature {
             return AmbientTransferTestState::Err(Error::TemperatureOutOfBounds(format!(
                 "Temperature out of bounds: {} lower tham limit of {} ❄",
                 current_temperature,
-                self.temperature_samples[2] - 15.0
+                self.heatup_test_data.temperature_samples[2] - 15.0
             )));
         } else if current_temperature >= self.target + 15.0 {
             return AmbientTransferTestState::Err(Error::TemperatureOutOfBounds(format!(
@@ -467,22 +443,6 @@ impl AmbientTransferTest {
         self.total_energy / self.test_duration.as_secs_f32()
     }
 
-    fn get_interval(&self) -> usize {
-        self.sample_distance * (self.sample_count / 2)
-    }
-
-    fn get_3_samples(&self) -> Option<(f32, f32, f32)> {
-        if self.sample_count < 3 {
-            return None;
-        }
-
-        let first = self.temperature_samples[0];
-        let second = self.temperature_samples[(self.sample_count - 1) / 2];
-        let third = self.temperature_samples[self.sample_count - 1];
-
-        Some((first, second, third))
-    }
-
     fn estimate_values_from_thermal_transfer(
         &mut self,
         ambient_temperature: f32,
@@ -494,18 +454,22 @@ impl AmbientTransferTest {
             ambient_temperature + HEATER_MAX_POWER / ambient_transfer_coefficient;
         log::debug!("Asymptotic temperature: {}", asymptotic_temperature);
 
-        let (s0, s1, _) = self.get_3_samples().ok_or(Error::InsufficientData(
-            "Need at least 3 samples to estimate values".to_string(),
-        ))?;
+        let (s0, s1, _) = self
+            .heatup_test_data
+            .get_3_samples()
+            .ok_or(Error::InsufficientData(
+                "Need at least 3 samples to estimate values".to_string(),
+            ))?;
         let boiler_responsiveness =
             f32::ln((s0 - asymptotic_temperature) / (s1 - asymptotic_temperature))
-                / self.get_interval() as f32;
+                / self.heatup_test_data.get_interval() as f32;
 
         log::debug!("Boiler responsiveness: {:+e}", boiler_responsiveness);
-        log::debug!("Interval: {}", self.get_interval());
+        log::debug!("Interval: {}", self.heatup_test_data.get_interval());
         let boiler_thermal_mass = ambient_transfer_coefficient / boiler_responsiveness;
 
-        let first_temperature_sample_time = self.time_to_halfway_point.as_secs_f32();
+        let first_temperature_sample_time =
+            self.heatup_test_data.time_to_halfway_point.as_secs_f32();
         log::debug!("first sample time: {}", first_temperature_sample_time);
         let probe_responsiveness = boiler_responsiveness
             / (1.0
@@ -672,12 +636,14 @@ impl HeuristicAutoTuner {
         let (estimated_temperature, _mpc) =
             heatup_results.estimate_values_from_heatup(self.ambient_temperature.unwrap())?;
 
+        let mut ambient_transfer_test =
+            AmbientTransferTest::new(heatup_results, self.ambient_temperature.unwrap())?;
+
         // [ ] when we have MPC control here, set the first tpass values.
         log::info!("Settling down");
-        self.settle_down(estimated_temperature);
+        self.settle_down(ambient_transfer_test.target);
 
         log::info!("Measuring ambient transfer");
-        let mut ambient_transfer_test = AmbientTransferTest::from(heatup_results);
         ambient_transfer_test.start(Duration::from_secs(500), Duration::from_secs(30));
 
         let mut power = 0.0;
