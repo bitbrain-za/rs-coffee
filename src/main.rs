@@ -1,6 +1,6 @@
 // [ ] Go through all the "expects" and change them to put the system into an error/panic state
 // [ ] Remove this later, just silence warnings while we're doing large scale writing
-#![allow(dead_code)]
+// #![allow(dead_code)]
 mod app_state;
 mod board;
 mod components;

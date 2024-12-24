@@ -7,6 +7,13 @@ const HEATER_MAX_POWER: f32 = 1000.0;
 const TRANSFER_TEST_HEATER_POWER: f32 = HEATER_MAX_POWER * 0.5;
 const TARGET_TEMPERATURE: f32 = 94.0;
 
+#[cfg(feature = "simulate")]
+const TIME_DILATION_FACTOR: f32 = 0.01;
+#[cfg(not(feature = "simulate"))]
+const TIME_DILATION_FACTOR: f32 = 1.0;
+
+const SAMPLE_TIME: Duration = Duration::from_secs(1);
+
 #[derive(Debug, Default)]
 struct DifferentialData {
     rate: f32,
@@ -36,60 +43,112 @@ impl std::fmt::Display for Error {
 
 impl std::error::Error for Error {}
 
-enum Step {
-    Setup,
-    Run,
-    Done,
-}
-
 #[derive(Default)]
 enum Mode {
     #[default]
     Setup,
-    Ambient(Step),
-    Heatup(Step),
-    Settle(Step),
-    Transfer(Step),
 }
 
 #[derive(Default)]
 pub struct HeuristicAutoTuner {
     sample_time: Duration,
+    ambient_temperature: Option<f32>,
+    boiler_simulator: BoilerModel,
+    results: Option<BoilerModelParameters>,
+    ambient_measurement: AmbientTest,
+}
+
+pub struct AmbientTest {
+    initial_sample: f32,
+    end_of_settling_time: Instant,
+    retries: usize,
+}
+
+impl Default for AmbientTest {
+    fn default() -> Self {
+        Self {
+            initial_sample: 0.0,
+            end_of_settling_time: Instant::now(),
+            retries: 0,
+        }
+    }
+}
+
+pub enum AmbientMeasurementState {
+    Busy(Duration),
+    Done(f32),
+    Err(Error),
+}
+
+impl AmbientTest {
+    pub fn start(
+        &mut self,
+        test_duration: Option<Duration>,
+        retries: Option<usize>,
+        current_temperature: f32,
+    ) {
+        self.end_of_settling_time = Instant::now()
+            + test_duration.unwrap_or(Duration::from_secs_f32(60.0 * TIME_DILATION_FACTOR));
+
+        self.retries = retries.unwrap_or(0);
+        self.initial_sample = current_temperature;
+    }
+
+    fn sample(&mut self, current_probe: f32) -> AmbientMeasurementState {
+        if Instant::now() >= self.end_of_settling_time {
+            if (current_probe - self.initial_sample).abs() < 1.0 {
+                AmbientMeasurementState::Done((self.initial_sample + current_probe) / 2.0)
+            } else if self.retries > 0 {
+                self.retries -= 1;
+                self.end_of_settling_time = Instant::now() + Duration::from_secs(10);
+                AmbientMeasurementState::Busy(Duration::from_secs(10))
+            } else {
+                AmbientMeasurementState::Err(Error::TemperatureNotStable)
+            }
+        } else {
+            AmbientMeasurementState::Busy(self.end_of_settling_time - Instant::now())
+        }
+    }
+}
+
+#[derive(Default)]
+struct HeatupTest {
+    sample_time: Duration,
     temperature_samples: Vec<f32>,
     sample_count: usize,
     sample_distance: usize,
-    time_to_halfway_point: Option<Duration>,
-    elapsed_time_heating: Option<Duration>,
-    ambient_temperature: Option<f32>,
-    boiler_simulator: BoilerModel,
+    time_to_halfway_point: Duration,
+    elapsed_time_heating: Duration,
     differential_data: DifferentialData,
-    results: Option<BoilerModelParameters>,
-    mode: Mode,
+    next_test_time: Option<Instant>,
+    test_interval: Duration,
+    target: f32,
+    start_time: Option<Instant>,
 }
 
-impl HeuristicAutoTuner {
-    pub fn new(sample_time: Duration) -> Self {
-        let mut boiler_simulator = BoilerModel::new(Some(25.0));
-        boiler_simulator.max_power = HEATER_MAX_POWER;
-        Self {
-            sample_time,
-            temperature_samples: vec![0.0; 16],
-            sample_count: 0,
-            sample_distance: 1,
-            boiler_simulator,
-            ..Default::default()
-        }
-    }
+enum HeatupTestState {
+    Busy,
+    Done(HeatupTestData),
+    Err(Error),
+}
 
-    pub fn get_probe(&self) -> f32 {
-        self.boiler_simulator.get_noisy_probe()
-    }
+struct HeatupTestData {
+    temperature_samples: Vec<f32>,
+    sample_count: usize,
+    sample_distance: usize,
+    power: f32,
+    time_to_halfway_point: Duration,
+    elapsed_time_heating: Duration,
+    mpc: BoilerModelParameters,
+    estimated_temperature: f32,
+}
 
+impl HeatupTestData {
     fn get_interval(&self) -> usize {
         self.sample_distance * (self.sample_count / 2)
     }
 
-    pub fn get_3_samples(&self) -> Option<(f32, f32, f32)> {
+    fn get_3_samples(&self) -> Option<(f32, f32, f32)> {
         if self.sample_count < 3 {
             return None;
         }
@@ -101,239 +160,10 @@ impl HeuristicAutoTuner {
         Some((first, second, third))
     }
 
-    fn settle_down(&mut self, target: f32) {
-        let test_interval = if Duration::from_secs(1) > self.sample_time {
-            Duration::from_secs(1)
-        } else {
-            self.sample_time
-        };
-
-        let mut current_time = Instant::now();
-        let mut next_test_time = current_time + test_interval;
-
-        loop {
-            self.boiler_simulator
-                .update(HEATER_MAX_POWER / 2.0, test_interval);
-            current_time += test_interval;
-
-            if current_time >= next_test_time {
-                let current_temp = self.get_probe();
-                if current_temp > target + 1.0 {
-                    break;
-                }
-                next_test_time += test_interval;
-            }
-        }
-        loop {
-            self.boiler_simulator.update(0.0, test_interval);
-            current_time += test_interval;
-
-            if current_time >= next_test_time {
-                let current_temp = self.get_probe();
-                if current_temp <= target {
-                    break;
-                }
-                next_test_time += test_interval;
-            }
-        }
-    }
-
-    pub fn measure_ambient(
+    fn estimate_values_from_heatup(
         &mut self,
-        duration: Duration,
-        max_delta: f32,
-        timeout: Option<Duration>,
-    ) -> Result<f32, Error> {
-        let mut retries = timeout.map(|t| t.as_millis() / duration.as_millis());
-
-        loop {
-            let mut samples: [f32; 2] = [0.0, 0.0];
-
-            samples[0] = self.get_probe();
-            self.boiler_simulator.update(0.0, duration);
-            samples[1] = self.get_probe();
-
-            let delta = (samples[1] - samples[0]).abs();
-            if delta < max_delta {
-                /* Check we're not still cooling down */
-                if samples[0] <= samples[1] {
-                    log::trace!("Ambient temperature samples: {:?}", samples);
-                    self.ambient_temperature = Some((samples[0] + samples[1]) / 2.0);
-                    log::debug!("Ambient temperature: {}", self.ambient_temperature.unwrap());
-                    return Ok(self.ambient_temperature.unwrap());
-                }
-            }
-
-            if let Some(remaining) = retries {
-                if remaining == 0 {
-                    return Err(Error::TemperatureNotStable);
-                } else {
-                    retries = Some(remaining - 1);
-                }
-            }
-        }
-    }
-
-    fn measure_heatup(&mut self, target: f32) -> Result<(), Error> {
-        let test_interval = if Duration::from_secs(1) > self.sample_time {
-            Duration::from_secs(1)
-        } else {
-            self.sample_time
-        };
-
-        self.sample_count = 0;
-        self.sample_distance = 1;
-        self.time_to_halfway_point = None;
-        self.elapsed_time_heating = None;
-        self.differential_data = DifferentialData::default();
-        let mut current_time = Instant::now();
-        self.time_to_halfway_point = None;
-
-        let start_time = Instant::now();
-        let mut next_test_time = start_time + test_interval;
-
-        let current_temperature = self.get_probe();
-        for i in 0..3 {
-            self.temperature_samples[i] = current_temperature;
-        }
-
-        loop {
-            self.boiler_simulator
-                .update(HEATER_MAX_POWER, test_interval);
-            current_time += test_interval;
-
-            if current_time >= next_test_time {
-                let current_temperature = self.get_probe();
-                log::trace!(
-                    "Sample @ {:?}s = {} degees",
-                    current_time,
-                    current_temperature
-                );
-
-                if current_temperature < target / 2.0 {
-                    self.temperature_samples[0] = self.temperature_samples[1];
-                    self.temperature_samples[1] = self.temperature_samples[2];
-                    self.temperature_samples[2] = current_temperature;
-
-                    let current_slope = (self.temperature_samples[2] - self.temperature_samples[0])
-                        / (2.0 * test_interval.as_secs_f32());
-
-                    if current_slope > self.differential_data.rate {
-                        self.differential_data.rate = current_slope;
-                        self.differential_data.temperature = self.temperature_samples[1];
-                        self.differential_data.time = Some(current_time - test_interval);
-                    }
-                } else if current_temperature < target {
-                    if self.sample_count == 0 {
-                        self.time_to_halfway_point = Some(current_time - start_time);
-                    }
-
-                    /* Double sample spacing if we are out of samples */
-                    if self.sample_count == self.temperature_samples.len() {
-                        for i in 0..(self.temperature_samples.len() / 2) {
-                            self.temperature_samples[i] = self.temperature_samples[i * 2];
-                        }
-                        self.sample_distance *= 2;
-                        self.sample_count /= 2;
-                    }
-
-                    self.temperature_samples[self.sample_count] = current_temperature;
-                    self.sample_count += 1;
-                } else {
-                    self.elapsed_time_heating = Some(current_time - start_time);
-
-                    if self.sample_count == 0 {
-                        return Err(Error::UnableToPerformTest(
-                            "Need to be well below the target to perform the heatup test"
-                                .to_string(),
-                        ));
-                    } else if self.sample_count % 2 == 0 {
-                        self.sample_count -= 1;
-                    }
-                    log::trace!("Heatup samples: {:?}", self.temperature_samples);
-                    log::trace!("Elapsed time heating: {:?}", self.elapsed_time_heating);
-                    return Ok(());
-                }
-                next_test_time += test_interval * self.sample_distance as u32;
-            }
-        }
-    }
-
-    fn measure_ambient_transfer(
-        &mut self,
-        test_duration: Duration,
-        settle_time: Duration,
-        target: f32,
-    ) -> Result<f32, Error> {
-        let test_interval = if Duration::from_secs(1) > self.sample_time {
-            Duration::from_secs(1)
-        } else {
-            self.sample_time
-        };
-
-        let boiler_heat_capacity = self
-            .results
-            .as_ref()
-            .ok_or(Error::InsufficientData(
-                "Need to estimate values from heatup test first".to_string(),
-            ))?
-            .thermal_mass;
-
-        let start_time = Instant::now();
-        let mut next_test_time = start_time + test_interval;
-        let settle_time_end = start_time + settle_time;
-        let test_end_time = settle_time_end + test_duration;
-
-        let mut total_energy = 0.0;
-        let mut heater_power = TRANSFER_TEST_HEATER_POWER;
-        let mut current_time = Instant::now();
-        let mut previous_temperature = self.get_probe();
-
-        loop {
-            current_time += self.sample_time;
-
-            if current_time >= next_test_time {
-                self.boiler_simulator.update(heater_power, test_interval);
-                let current_temperature = self.get_probe();
-
-                if current_time < test_end_time && current_time >= settle_time_end {
-                    let energy = heater_power * test_interval.as_secs_f32()
-                        + (previous_temperature - current_temperature) * boiler_heat_capacity;
-                    total_energy += energy;
-                } else if current_time >= test_end_time {
-                    log::trace!("Total energy: {}", total_energy);
-                    log::trace!("Test duration: {}", test_duration.as_secs_f32());
-                    return Ok(total_energy / test_duration.as_secs_f32());
-                }
-
-                if self.temperature_samples[2] - 15.0 >= current_temperature {
-                    return Err(Error::TemperatureOutOfBounds(format!(
-                        "Temperature out of bounds: {} lower tham limit of {} ❄",
-                        current_temperature,
-                        self.temperature_samples[2] - 15.0
-                    )));
-                } else if current_temperature >= target + 15.0 {
-                    return Err(Error::TemperatureOutOfBounds(format!(
-                        "Temperature out of bounds: {} higher than limit of{} 🔥",
-                        current_temperature,
-                        target + 15.0
-                    )));
-                }
-
-                previous_temperature = current_temperature;
-                next_test_time += test_interval;
-
-                // just bitbang for now. In the real implementation, activate MPC with the estimated values
-                if current_temperature >= target {
-                    heater_power = 0.0;
-                } else {
-                    heater_power = TRANSFER_TEST_HEATER_POWER;
-                }
-            }
-        }
-    }
-
-    fn estimate_values_from_heatup(&mut self) -> Result<f32, Error> {
+        ambient_temperature: f32,
+    ) -> Result<(f32, BoilerModelParameters), Error> {
         let (s0, s1, s2) = self.get_3_samples().ok_or(Error::InsufficientData(
             "Need at least 3 samples to estimate values".to_string(),
         ))?;
@@ -346,10 +176,6 @@ impl HeuristicAutoTuner {
             f32::ln((s0 - asymptotic_temperature) / (s1 - asymptotic_temperature))
                 / self.get_interval() as f32;
 
-        let ambient_temperature = self.ambient_temperature.ok_or(Error::InsufficientData(
-            "Requires an ambient temperature is measured first".to_string(),
-        ))?;
-
         log::debug!(
             "asymptotic_temperature: {}, boiler_responsiveness: {}",
             asymptotic_temperature,
@@ -357,16 +183,12 @@ impl HeuristicAutoTuner {
         );
 
         let ambient_transfer_coefficient =
-            self.boiler_simulator.max_power / (asymptotic_temperature - ambient_temperature);
+            self.power / (asymptotic_temperature - ambient_temperature);
 
         let boiler_thermal_mass = ambient_transfer_coefficient / boiler_responsiveness;
 
-        let first_temperature_sample_time = self
-            .time_to_halfway_point
-            .ok_or(Error::InsufficientData(
-                "Need to get the time of the first sample".to_string(),
-            ))?
-            .as_secs_f32();
+        let first_temperature_sample_time =
+            self.time_to_halfway_point.as_secs_f32() / TIME_DILATION_FACTOR;
 
         let probe_responsiveness = boiler_responsiveness
             / (1.0
@@ -374,49 +196,291 @@ impl HeuristicAutoTuner {
                     * (-boiler_responsiveness * first_temperature_sample_time).exp()
                     / (s0 - asymptotic_temperature));
 
-        self.results = Some(BoilerModelParameters {
+        self.mpc = BoilerModelParameters {
             thermal_mass: boiler_thermal_mass,
             ambient_transfer_coefficient,
             probe_responsiveness,
-        });
+        };
 
-        log::info!("Estimated values:");
-        self.print_results();
+        let elapsed_time_heating = self.elapsed_time_heating.as_secs_f32() / TIME_DILATION_FACTOR;
 
-        let elapsed_time_heating = self
-            .elapsed_time_heating
-            .ok_or(Error::InsufficientData(
-                "Heatup test needs to be completed first".to_string(),
-            ))?
-            .as_secs_f32();
-        log::trace!("Elapsed time heating: {}", elapsed_time_heating);
-
-        let estimated_temperature = asymptotic_temperature
+        self.estimated_temperature = asymptotic_temperature
             + (ambient_temperature - asymptotic_temperature)
                 * (-boiler_responsiveness * elapsed_time_heating).exp();
 
-        log::trace!("Estimated temperature: {}", estimated_temperature);
+        log::debug!("Estimated temperature: {}", self.estimated_temperature);
+        log::debug!("Estimated values: {:?}", self.mpc);
+        log::debug!("Time to 50%: {:.2}", first_temperature_sample_time);
+        log::debug!("Elapsed time heating: {}", elapsed_time_heating);
+
+        Ok((self.estimated_temperature, self.mpc))
+    }
+}
+
+impl HeatupTest {
+    fn start(&mut self, current_temperature: f32, target: f32) {
+        self.test_interval = if Duration::from_secs(1) > self.sample_time {
+            Duration::from_secs(1)
+        } else {
+            self.sample_time
+        };
         #[cfg(feature = "simulate")]
-        log::trace!(
-            "Actual temperature: {}",
-            self.boiler_simulator.get_actual_temperature()
-        );
-        Ok(estimated_temperature)
+        {
+            let test_interval = self.test_interval.as_secs_f32() * TIME_DILATION_FACTOR;
+            self.test_interval = Duration::from_secs_f32(test_interval);
+        }
+
+        self.sample_count = 0;
+        self.sample_distance = 1;
+        self.differential_data = DifferentialData::default();
+        self.temperature_samples = vec![0.0; 16];
+        let start_time = Instant::now();
+        self.start_time = Some(start_time);
+        self.next_test_time = Some(start_time + self.test_interval);
+        self.target = target;
+
+        for i in 0..3 {
+            self.temperature_samples[i] = current_temperature;
+        }
+    }
+
+    fn measure(&mut self, current_temperature: f32) -> HeatupTestState {
+        let current_time = Instant::now();
+        if self.next_test_time.is_none() || self.start_time.is_none() {
+            return HeatupTestState::Err(Error::UnableToPerformTest(
+                "Need to start the test first".to_string(),
+            ));
+        }
+        let next_time = self.next_test_time.unwrap();
+        let start_time = self.start_time.unwrap();
+
+        if current_time >= next_time {
+            log::trace!(
+                "Sample @ {:?}s = {} degees",
+                current_time,
+                current_temperature
+            );
+
+            if current_temperature < self.target / 2.0 {
+                self.temperature_samples[0] = self.temperature_samples[1];
+                self.temperature_samples[1] = self.temperature_samples[2];
+                self.temperature_samples[2] = current_temperature;
+
+                let current_slope = (self.temperature_samples[2] - self.temperature_samples[0])
+                    / (2.0 * self.test_interval.as_secs_f32());
+
+                if current_slope > self.differential_data.rate {
+                    self.differential_data.rate = current_slope;
+                    self.differential_data.temperature = self.temperature_samples[1];
+                    self.differential_data.time = Some(current_time - self.test_interval);
+                }
+            } else if current_temperature < self.target {
+                if self.sample_count == 0 {
+                    self.time_to_halfway_point = current_time - start_time;
+                }
+
+                /* Double sample spacing if we are out of samples */
+                if self.sample_count == self.temperature_samples.len() {
+                    for i in 0..(self.temperature_samples.len() / 2) {
+                        self.temperature_samples[i] = self.temperature_samples[i * 2];
+                    }
+                    self.sample_distance *= 2;
+                    self.sample_count /= 2;
+                }
+
+                self.temperature_samples[self.sample_count] = current_temperature;
+                self.sample_count += 1;
+            } else {
+                self.elapsed_time_heating = current_time - start_time;
+
+                if self.sample_count == 0 {
+                    return HeatupTestState::Err(Error::UnableToPerformTest(
+                        "Need to be well below the target to perform the heatup test".to_string(),
+                    ));
+                } else if self.sample_count % 2 == 0 {
+                    self.sample_count -= 1;
+                }
+                log::trace!("Heatup samples: {:?}", self.temperature_samples);
+                log::trace!("Elapsed time heating: {:?}", self.elapsed_time_heating);
+                return HeatupTestState::Done(HeatupTestData {
+                    temperature_samples: self.temperature_samples.clone(),
+                    sample_count: self.sample_count,
+                    sample_distance: self.sample_distance,
+                    power: HEATER_MAX_POWER,
+                    time_to_halfway_point: self.time_to_halfway_point,
+                    elapsed_time_heating: self.elapsed_time_heating,
+                    mpc: BoilerModelParameters::default(),
+                    estimated_temperature: 0.0,
+                });
+            }
+            self.next_test_time =
+                Some(next_time + self.test_interval * self.sample_distance as u32);
+        }
+
+        HeatupTestState::Busy
+    }
+}
+
+struct AmbientTransferTest {
+    sample_time: Duration,
+    test_interval: Duration,
+    temperature_samples: Vec<f32>,
+    sample_count: usize,
+    sample_distance: usize,
+    time_to_halfway_point: Duration,
+    mpc: BoilerModelParameters,
+    next_test_time: Instant,
+    start_time: Instant,
+    settle_time_end: Instant,
+    test_end_time: Instant,
+    total_energy: f32,
+    previous_temperature: f32,
+    test_duration: Duration,
+    target: f32,
+}
+
+impl Default for AmbientTransferTest {
+    fn default() -> Self {
+        Self {
+            sample_time: SAMPLE_TIME,
+            test_interval: Duration::from_secs(1),
+            temperature_samples: vec![0.0; 16],
+            sample_count: 0,
+            sample_distance: 1,
+            time_to_halfway_point: Duration::from_secs(0),
+            mpc: BoilerModelParameters::default(),
+            start_time: Instant::now(),
+            next_test_time: Instant::now() + Duration::from_secs(1),
+            settle_time_end: Instant::now(),
+            test_end_time: Instant::now(),
+            total_energy: 0.0,
+            previous_temperature: 0.0,
+            test_duration: Duration::from_secs(0),
+            target: 0.0,
+        }
+    }
+}
+
+impl From<HeatupTestData> for AmbientTransferTest {
+    fn from(data: HeatupTestData) -> Self {
+        Self {
+            mpc: data.mpc,
+            sample_time: SAMPLE_TIME,
+            temperature_samples: data.temperature_samples,
+            sample_count: data.sample_count,
+            sample_distance: data.sample_distance,
+            time_to_halfway_point: data.time_to_halfway_point,
+            target: data.estimated_temperature,
+            ..Default::default()
+        }
+    }
+}
+enum AmbientTransferTestState {
+    Busy,
+    Done(f32),
+    Err(Error),
+}
+
+impl AmbientTransferTest {
+    fn start(&mut self, test_duration: Duration, settle_time: Duration, current_temperature: f32) {
+        self.test_interval = if Duration::from_secs(1) > self.sample_time {
+            Duration::from_secs(1)
+        } else {
+            self.sample_time
+        };
+
+        self.test_duration = test_duration;
+        #[cfg(feature = "simulate")]
+        {
+            let test_interval = self.test_interval.as_secs_f32() * TIME_DILATION_FACTOR;
+            self.test_interval = Duration::from_secs_f32(test_interval);
+        }
+
+        self.start_time = Instant::now();
+        self.next_test_time = self.start_time;
+        self.settle_time_end = self.start_time + settle_time;
+        self.test_end_time = self.settle_time_end + test_duration;
+
+        #[cfg(feature = "simulate")]
+        {
+            let settle_time = settle_time.as_secs_f32() * TIME_DILATION_FACTOR;
+            self.settle_time_end = self.start_time + Duration::from_secs_f32(settle_time);
+
+            let test_end = test_duration.as_secs_f32() * TIME_DILATION_FACTOR;
+            self.test_end_time = self.settle_time_end + Duration::from_secs_f32(test_end);
+        }
+
+        self.total_energy = 0.0;
+        self.previous_temperature = current_temperature;
+    }
+
+    fn measure(&mut self, heater_power: f32, current_temperature: f32) -> AmbientTransferTestState {
+        let boiler_heat_capacity = self.mpc.thermal_mass;
+
+        let current_time = Instant::now();
+
+        if current_time >= self.next_test_time {
+            if current_time < self.test_end_time && current_time >= self.settle_time_end {
+                let energy = heater_power
+                    * (self.test_interval.as_secs_f32() / TIME_DILATION_FACTOR)
+                    + (self.previous_temperature - current_temperature) * boiler_heat_capacity;
+                self.total_energy += energy;
+            } else if current_time >= self.test_end_time {
+                log::debug!("Total energy: {}", self.total_energy);
+                log::debug!("Test duration: {}", self.test_duration.as_secs_f32());
+                return AmbientTransferTestState::Done(self.power());
+            }
+
+            if self.temperature_samples[2] - 15.0 >= current_temperature {
+                return AmbientTransferTestState::Err(Error::TemperatureOutOfBounds(format!(
+                    "Temperature out of bounds: {} lower tham limit of {} ❄",
+                    current_temperature,
+                    self.temperature_samples[2] - 15.0
+                )));
+            } else if current_temperature >= self.target + 15.0 {
+                return AmbientTransferTestState::Err(Error::TemperatureOutOfBounds(format!(
+                    "Temperature out of bounds: {} higher than limit of{} 🔥",
+                    current_temperature,
+                    self.target + 15.0
+                )));
+            }
+
+            self.previous_temperature = current_temperature;
+            self.next_test_time += self.test_interval;
+        }
+        AmbientTransferTestState::Busy
+    }
+
+    fn power(&self) -> f32 {
+        self.total_energy / self.test_duration.as_secs_f32()
+    }
+    fn get_interval(&self) -> usize {
+        self.sample_distance * (self.sample_count / 2)
+    }
+
+    fn get_3_samples(&self) -> Option<(f32, f32, f32)> {
+        if self.sample_count < 3 {
+            return None;
+        }
+
+        let first = self.temperature_samples[0];
+        let second = self.temperature_samples[(self.sample_count - 1) / 2];
+        let third = self.temperature_samples[self.sample_count - 1];
+
+        Some((first, second, third))
     }
 
     fn estimate_values_from_thermal_transfer(
         &mut self,
-        power: f32,
-        target_temperature: f32,
+        ambient_temperature: f32,
     ) -> Result<BoilerModelParameters, Error> {
-        let ambient_temperature = self.ambient_temperature.ok_or(Error::InsufficientData(
-            "Need to measure ambient temperature first".to_string(),
-        ))?;
-
-        let ambient_transfer_coefficient = power / (target_temperature - ambient_temperature);
+        log::debug!("Target: {}, Ambient: {}", self.target, ambient_temperature);
+        let ambient_transfer_coefficient = self.power() / (self.target - ambient_temperature);
 
         let asymptotic_temperature =
             ambient_temperature + HEATER_MAX_POWER / ambient_transfer_coefficient;
+        log::debug!("Asymptotic temperature: {}", asymptotic_temperature);
+
         let (s0, s1, _) = self.get_3_samples().ok_or(Error::InsufficientData(
             "Need at least 3 samples to estimate values".to_string(),
         ))?;
@@ -424,14 +488,13 @@ impl HeuristicAutoTuner {
             f32::ln((s0 - asymptotic_temperature) / (s1 - asymptotic_temperature))
                 / self.get_interval() as f32;
 
+        log::debug!("Boiler responsiveness: {}", boiler_responsiveness);
+        log::debug!("Interval: {}", self.get_interval());
         let boiler_thermal_mass = ambient_transfer_coefficient / boiler_responsiveness;
 
-        let first_temperature_sample_time = self
-            .time_to_halfway_point
-            .ok_or(Error::InsufficientData(
-                "Need to get the time of the first sample".to_string(),
-            ))?
-            .as_secs_f32();
+        let first_temperature_sample_time =
+            self.time_to_halfway_point.as_secs_f32() / TIME_DILATION_FACTOR;
+        log::debug!("first sample time: {}", first_temperature_sample_time);
         let probe_responsiveness = boiler_responsiveness
             / (1.0
                 - (ambient_temperature - asymptotic_temperature)
@@ -443,6 +506,60 @@ impl HeuristicAutoTuner {
             ambient_transfer_coefficient,
             probe_responsiveness,
         })
+    }
+}
+
+impl HeuristicAutoTuner {
+    pub fn new(sample_time: Duration) -> Self {
+        let mut boiler_simulator = BoilerModel::new(Some(25.0));
+        boiler_simulator.max_power = HEATER_MAX_POWER;
+        Self {
+            sample_time,
+            boiler_simulator,
+            ..Default::default()
+        }
+    }
+
+    pub fn get_probe(&self) -> f32 {
+        // self.boiler_simulator.get_noisy_probe()
+        self.boiler_simulator.probe_temperature
+    }
+
+    fn settle_down(&mut self, target: f32) {
+        let test_interval = Duration::from_secs(1);
+
+        let mut current_time = Instant::now();
+        let mut next_test_time = current_time + test_interval;
+
+        loop {
+            self.boiler_simulator
+                .update(HEATER_MAX_POWER / 2.0, test_interval);
+            current_time += test_interval;
+
+            if current_time >= next_test_time {
+                let current_temp = self.get_probe();
+                if current_temp > target + 0.5 {
+                    log::debug!("Settling up @ {:?}s", current_time);
+                    break;
+                }
+                next_test_time += test_interval;
+            }
+        }
+        loop {
+            self.boiler_simulator.update(0.0, test_interval);
+            current_time += test_interval;
+
+            if current_time >= next_test_time {
+                let current_temp = self.get_probe();
+                if current_temp <= target {
+                    log::debug!("Settling down @ {:?}s", current_time);
+                    break;
+                } else {
+                    log::trace!("Settling down from {} to {}", current_temp, target);
+                }
+                next_test_time += test_interval;
+            }
+        }
     }
 
     pub fn print_results(&self) {
@@ -486,54 +603,103 @@ impl HeuristicAutoTuner {
     }
 
     pub fn auto_tune(&mut self) -> Result<(), Error> {
+        log::info!("Measuring ambient temperature");
+        self.ambient_measurement.start(None, None, self.get_probe());
+        let dt = self.sample_time;
         loop {
-            FreeRtos::delay_ms(self.sample_time.as_millis() as u32);
+            let power = 0.0;
+            FreeRtos::delay_ms(
+                (1000.0 * (self.sample_time.as_secs_f32() * TIME_DILATION_FACTOR)) as u32,
+            );
+            self.boiler_simulator.update(power, dt);
 
-            match self.mode {
-                Mode::Setup => {
-                    log::info!("Setting up");
-                    self.mode = Mode::Ambient(Step::Setup);
-                }
-                Mode::Ambient(Step::Setup) => {
-                    log::info!("Measuring ambient temperature");
-                    self.mode = Mode::Ambient(Step::Run);
-                }
-                Mode::Ambient(Step::Run) => {
-                    log::info!("Measuring ambient temperature");
-                    self.measure_ambient(Duration::from_secs(60), 1.0, None)?;
+            match self.ambient_measurement.sample(self.get_probe()) {
+                AmbientMeasurementState::Done(ambient_temperature) => {
+                    self.ambient_temperature = Some(ambient_temperature);
+                    #[cfg(feature = "simulate")]
+                    {
+                        self.boiler_simulator.ambient_temperature = ambient_temperature;
+                    }
                     log::debug!(
                         "Ambient Temperature = {}",
                         self.boiler_simulator.ambient_temperature
                     );
-                    self.mode = Mode::Heatup(Step::Setup);
+                    break;
                 }
-                _ => todo!(),
+                AmbientMeasurementState::Err(e) => return Err(e),
+                _ => {}
             }
         }
-        log::info!("Measurt ambient temperature");
-        self.measure_ambient(Duration::from_secs(60), 1.0, None)?;
-        log::debug!(
-            "Ambient Temperature = {}",
-            self.boiler_simulator.ambient_temperature
-        );
 
         log::info!("Measuring heatup");
-        self.measure_heatup(TARGET_TEMPERATURE)?;
+
+        let mut heatup_test = HeatupTest {
+            sample_time: self.sample_time,
+            ..Default::default()
+        };
+        heatup_test.start(self.get_probe(), TARGET_TEMPERATURE);
+        let mut heatup_results: HeatupTestData;
+        loop {
+            let power = 1000.0;
+            FreeRtos::delay_ms(
+                (1000.0 * (self.sample_time.as_secs_f32() * TIME_DILATION_FACTOR)) as u32,
+            );
+            self.boiler_simulator.update(power, dt);
+
+            match heatup_test.measure(self.get_probe()) {
+                HeatupTestState::Done(results) => {
+                    heatup_results = results;
+                    break;
+                }
+                HeatupTestState::Err(e) => return Err(e),
+                _ => {}
+            }
+        }
 
         log::info!("Estimating values from heatup");
-        let estimated_temperature = self.estimate_values_from_heatup()?;
+        let (estimated_temperature, _mpc) =
+            heatup_results.estimate_values_from_heatup(self.ambient_temperature.unwrap())?;
 
+        // [ ] when we have MPC control here, set the first tpass values.
+        log::info!("Settling down");
         self.settle_down(estimated_temperature);
 
         log::info!("Measuring ambient transfer");
-        let power = self.measure_ambient_transfer(
+        let mut ambient_transfer_test = AmbientTransferTest::from(heatup_results);
+        ambient_transfer_test.start(
             Duration::from_secs(500),
             Duration::from_secs(0),
-            estimated_temperature,
-        )?;
+            self.get_probe(),
+        );
+
+        loop {
+            let current_temperature = self.get_probe();
+            // just bitbang for now. In the real implementation, activate MPC with the estimated values
+
+            let power = if current_temperature >= estimated_temperature {
+                0.0
+            } else {
+                TRANSFER_TEST_HEATER_POWER
+            };
+            FreeRtos::delay_ms(
+                (1000.0 * (self.sample_time.as_secs_f32() * TIME_DILATION_FACTOR)) as u32,
+            );
+            self.boiler_simulator.update(power, dt);
+
+            match ambient_transfer_test.measure(power, self.get_probe()) {
+                AmbientTransferTestState::Done(test_power) => {
+                    log::debug!("Power: {}", test_power);
+                    break;
+                }
+                AmbientTransferTestState::Err(e) => return Err(e),
+
+                _ => {}
+            }
+        }
 
         log::info!("Estimating values from thermal transfer");
-        let results = self.estimate_values_from_thermal_transfer(power, estimated_temperature)?;
+        let results = ambient_transfer_test
+            .estimate_values_from_thermal_transfer(self.ambient_temperature.unwrap())?;
 
         self.results = Some(results);
 
