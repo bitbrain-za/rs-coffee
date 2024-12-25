@@ -41,6 +41,8 @@ fn elapsed_as_secs_f32_with_dilation(instant: Instant) -> f32 {
     return instant.elapsed().as_secs_f32();
 }
 
+type Temperature = f32;
+
 #[derive(Default)]
 enum HeuristicAutoTunerState {
     #[default]
@@ -49,6 +51,19 @@ enum HeuristicAutoTunerState {
     MeasureHeatingUp(HeatupTest),
     MeasureSteadyState(SteadyStateTest),
     Done,
+}
+
+impl std::fmt::Display for HeuristicAutoTunerState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            HeuristicAutoTunerState::Init => "Init",
+            HeuristicAutoTunerState::MeasureAmbient => "MeasureAmbient",
+            HeuristicAutoTunerState::MeasureHeatingUp(_) => "MeasureHeatingUp",
+            HeuristicAutoTunerState::MeasureSteadyState(_) => "MeasureSteadyState",
+            HeuristicAutoTunerState::Done => "Done",
+        };
+        write!(f, "{}", state)
+    }
 }
 
 impl PartialEq for HeuristicAutoTunerState {
@@ -85,7 +100,7 @@ enum SettlingState {
 #[derive(Debug, Default)]
 struct DifferentialData {
     rate: f32,
-    temperature: f32,
+    temperature: Temperature,
     time: Option<Instant>,
 }
 
@@ -121,7 +136,7 @@ enum Mode {
 pub struct HeuristicAutoTuner {
     state: HeuristicAutoTunerState,
     sample_time: Duration,
-    ambient_temperature: Option<f32>,
+    ambient_temperature: Option<Temperature>,
     boiler_simulator: BoilerModel,
     results: Option<BoilerModelParameters>,
     ambient_measurement: AmbientTest,
@@ -129,7 +144,7 @@ pub struct HeuristicAutoTuner {
 }
 
 pub struct AmbientTest {
-    initial_sample: f32,
+    initial_sample: Temperature,
     end_of_settling_time: Instant,
     retries: usize,
 }
@@ -146,7 +161,7 @@ impl Default for AmbientTest {
 
 pub enum AmbientMeasurementState {
     Busy,
-    Done(f32),
+    Done(Temperature),
     Err(Error),
 }
 
@@ -155,7 +170,7 @@ impl AmbientTest {
         &mut self,
         test_duration: Duration,
         retries: Option<usize>,
-        current_temperature: f32,
+        current_temperature: Temperature,
     ) {
         let test_duration = convert_to_dilated_time(test_duration);
         self.end_of_settling_time = Instant::now() + test_duration;
@@ -164,7 +179,7 @@ impl AmbientTest {
         self.initial_sample = current_temperature;
     }
 
-    fn sample(&mut self, current_probe: f32) -> AmbientMeasurementState {
+    fn sample(&mut self, current_probe: Temperature) -> AmbientMeasurementState {
         if Instant::now() >= self.end_of_settling_time {
             if (current_probe - self.initial_sample).abs() < 1.0 {
                 AmbientMeasurementState::Done((self.initial_sample + current_probe) / 2.0)
@@ -183,9 +198,9 @@ impl AmbientTest {
 
 #[derive(Default)]
 struct HeatupTest {
-    target: f32,
+    target: Temperature,
 
-    temperature_samples: Vec<f32>,
+    temperature_samples: Vec<Temperature>,
     sample_count: usize,
     sample_distance: usize,
 
@@ -204,7 +219,7 @@ enum HeatupTestState {
 }
 
 struct HeatupTestData {
-    temperature_samples: Vec<f32>,
+    temperature_samples: Vec<Temperature>,
     sample_count: usize,
     sample_distance: usize,
     time_to_halfway_point: Duration,
@@ -219,7 +234,7 @@ impl HeatupTestData {
         self.sample_distance * (self.sample_count / 2)
     }
 
-    fn get_3_samples(&self) -> Option<(f32, f32, f32)> {
+    fn get_3_samples(&self) -> Option<(Temperature, Temperature, Temperature)> {
         if self.sample_count < 3 {
             return None;
         }
@@ -233,8 +248,8 @@ impl HeatupTestData {
 
     fn estimate_values_from_heatup(
         &mut self,
-        ambient_temperature: f32,
-    ) -> Result<(f32, BoilerModelParameters), Error> {
+        ambient_temperature: Temperature,
+    ) -> Result<(Temperature, BoilerModelParameters), Error> {
         let (s0, s1, s2) = self.get_3_samples().ok_or(Error::InsufficientData(
             "Need at least 3 samples to estimate values".to_string(),
         ))?;
@@ -288,7 +303,7 @@ impl HeatupTestData {
 }
 
 impl HeatupTest {
-    fn start(&mut self, current_temperature: f32, target: f32) {
+    fn start(&mut self, current_temperature: Temperature, target: Temperature) {
         self.test_interval = if Duration::from_secs(1) > self.sample_time {
             Duration::from_secs(1)
         } else {
@@ -310,7 +325,7 @@ impl HeatupTest {
         }
     }
 
-    fn measure(&mut self, current_temperature: f32) -> HeatupTestState {
+    fn measure(&mut self, current_temperature: Temperature) -> HeatupTestState {
         let current_time = Instant::now();
 
         if self.next_test_time.is_none() || self.start_time.is_none() {
@@ -393,7 +408,7 @@ enum SettleMode {
     #[default]
     None,
     Time(Duration),
-    Value(f32),
+    Value(Temperature),
 }
 
 struct SteadyStateTest {
@@ -401,10 +416,10 @@ struct SteadyStateTest {
     heatup_test_data: HeatupTestData,
 
     mpc: BoilerModelParameters,
-    target: f32,
+    target: Temperature,
 
     total_energy: f32,
-    previous_temperature: f32,
+    previous_temperature: Temperature,
 
     last_test_instant: Instant,
     test_duration: Duration,
@@ -440,7 +455,7 @@ impl PartialEq for SteadyStateTestState {
 }
 
 impl SteadyStateTest {
-    fn new(data: HeatupTestData, ambient_temperature: f32) -> Result<Self, Error> {
+    fn new(data: HeatupTestData, ambient_temperature: Temperature) -> Result<Self, Error> {
         let mut data = data;
         let (target, mpc) = data.estimate_values_from_heatup(ambient_temperature)?;
         Ok(Self {
@@ -485,7 +500,7 @@ impl SteadyStateTest {
         self.settle_mode = settle_mode;
     }
 
-    fn settle_down(&mut self, current_temperature: f32) {
+    fn settle_down(&mut self, current_temperature: Temperature) {
         let test_state = self.state.clone();
         let next = match (test_state, self.settle_mode) {
             (SteadyStateTestState::Settling(settling_state), SettleMode::Value(target)) => {
@@ -549,7 +564,11 @@ impl SteadyStateTest {
         self.state = next;
     }
 
-    fn measure(&mut self, heater_power: f32, current_temperature: f32) -> SteadyStateTestState {
+    fn measure(
+        &mut self,
+        heater_power: f32,
+        current_temperature: Temperature,
+    ) -> SteadyStateTestState {
         if let SteadyStateTestState::Settling(state) = self.state {
             if state != SettlingState::Done {
                 self.settle_down(current_temperature);
@@ -619,7 +638,7 @@ impl SteadyStateTest {
 
     fn estimate_values_from_thermal_transfer(
         &mut self,
-        ambient_temperature: f32,
+        ambient_temperature: Temperature,
     ) -> Result<BoilerModelParameters, Error> {
         log::debug!("Target: {}, Ambient: {}", self.target, ambient_temperature);
         let ambient_transfer_coefficient = self.power() / (self.target - ambient_temperature);
@@ -670,7 +689,7 @@ impl HeuristicAutoTuner {
         }
     }
 
-    fn get_probe(&self) -> f32 {
+    fn get_probe(&self) -> Temperature {
         // self.boiler_simulator.get_noisy_probe()
         self.boiler_simulator.probe_temperature
     }
@@ -715,6 +734,150 @@ impl HeuristicAutoTuner {
         }
     }
 
+    fn transition_state(&mut self, state: HeuristicAutoTunerState) -> Result<(), Error> {
+        log::debug!("Transitioning from {} to {}", self.state, state);
+
+        let current = &self.state;
+
+        if matches!(
+            (current, &state),
+            (
+                HeuristicAutoTunerState::Init,
+                HeuristicAutoTunerState::MeasureAmbient
+            ) | (
+                HeuristicAutoTunerState::MeasureAmbient,
+                HeuristicAutoTunerState::MeasureHeatingUp(_),
+            ) | (
+                HeuristicAutoTunerState::MeasureHeatingUp(_),
+                HeuristicAutoTunerState::MeasureSteadyState(_),
+            ) | (
+                HeuristicAutoTunerState::MeasureSteadyState(_),
+                HeuristicAutoTunerState::Done
+            )
+        ) {
+            self.state = state;
+            Ok(())
+        } else {
+            log::error!("Invalid state transition from {} to {}", current, state);
+            Err(Error::UnableToPerformTest(format!(
+                "Invalid state transition from {} to {}",
+                current, state
+            )))
+        }
+    }
+
+    fn handle_ambient_test(
+        &mut self,
+        current_temperature: Temperature,
+    ) -> Result<Option<HeuristicAutoTunerState>, Error> {
+        if let HeuristicAutoTunerState::MeasureAmbient = self.state {
+            match self.ambient_measurement.sample(self.get_probe()) {
+                AmbientMeasurementState::Done(ambient_temperature) => {
+                    self.ambient_temperature = Some(ambient_temperature);
+                    #[cfg(feature = "simulate")]
+                    {
+                        self.boiler_simulator.ambient_temperature = ambient_temperature;
+                    }
+                    log::debug!(
+                        "Ambient Temperature = {}",
+                        self.boiler_simulator.ambient_temperature
+                    );
+
+                    log::debug!("Measuring Heatup");
+                    let mut heatup_test = HeatupTest {
+                        sample_time: self.sample_time,
+                        ..Default::default()
+                    };
+                    heatup_test.start(current_temperature, config::AUTOTUNE_TARGET_TEMPERATURE);
+                    self.current_power = config::AUTOTUNE_MAX_POWER;
+                    Ok(Some(HeuristicAutoTunerState::MeasureHeatingUp(heatup_test)))
+                }
+                AmbientMeasurementState::Err(e) => Err(e),
+                _ => Ok(None),
+            }
+        } else {
+            Err(Error::UnableToPerformTest(
+                "Unable to call this test while in current state".to_string(),
+            ))
+        }
+    }
+
+    fn handle_heating_up_test(
+        &mut self,
+        current_temperature: Temperature,
+    ) -> Result<Option<HeuristicAutoTunerState>, Error> {
+        if let HeuristicAutoTunerState::MeasureHeatingUp(ref mut test) = self.state {
+            match test.measure(current_temperature) {
+                HeatupTestState::Done(mut heatup_results) => {
+                    let (estimated_temperature, _mpc) = heatup_results
+                        .estimate_values_from_heatup(self.ambient_temperature.unwrap())?;
+                    let mut ambient_transfer_test =
+                        SteadyStateTest::new(heatup_results, self.ambient_temperature.unwrap())?;
+                    self.current_power = 0.0;
+                    ambient_transfer_test.start(
+                        config::STEADY_STATE_TEST_TIME,
+                        SettleMode::Value(estimated_temperature),
+                    );
+
+                    log::debug!("Running Steady State test");
+                    Ok(Some(HeuristicAutoTunerState::MeasureSteadyState(
+                        ambient_transfer_test,
+                    )))
+                }
+                HeatupTestState::Err(e) => Err(e),
+                _ => Ok(None),
+            }
+        } else {
+            Err(Error::UnableToPerformTest(
+                "Unable to call this test while in current state".to_string(),
+            ))
+        }
+    }
+
+    fn handle_steady_state(
+        &mut self,
+        current_temperature: Temperature,
+    ) -> Result<Option<HeuristicAutoTunerState>, Error> {
+        if let HeuristicAutoTunerState::MeasureSteadyState(ref mut test) = self.state {
+            match test.measure(self.current_power, current_temperature) {
+                SteadyStateTestState::Done(test_power) => {
+                    log::debug!("Power: {}", test_power);
+
+                    log::info!("Estimating values from thermal transfer");
+                    let results = test
+                        .estimate_values_from_thermal_transfer(self.ambient_temperature.unwrap())?;
+
+                    self.results = Some(results);
+                    self.print_results();
+
+                    Ok(Some(HeuristicAutoTunerState::Done))
+                }
+                SteadyStateTestState::Err(e) => Err(e),
+                SteadyStateTestState::Settling(SettlingState::Cooling) => {
+                    self.current_power = 0.0;
+                    Ok(None)
+                }
+                SteadyStateTestState::Settling(SettlingState::Heating) => {
+                    self.current_power = config::AUTOTUNE_STEADY_STATE_POWER;
+                    Ok(None)
+                }
+                _ => {
+                    // [ ] just bitbang for now. In the real implementation, activate MPC with the estimated values
+                    self.current_power = if current_temperature >= test.target {
+                        0.0
+                    } else {
+                        config::AUTOTUNE_STEADY_STATE_POWER
+                    };
+                    Ok(None)
+                }
+            }
+        } else {
+            Err(Error::UnableToPerformTest(
+                "Unable to call this test while in current state".to_string(),
+            ))
+        }
+    }
+
     pub fn run(&mut self) -> Result<Option<BoilerModelParameters>, Error> {
         let dt = self.sample_time;
 
@@ -730,90 +893,13 @@ impl HeuristicAutoTuner {
                 Some(HeuristicAutoTunerState::MeasureAmbient)
             }
             HeuristicAutoTunerState::MeasureAmbient => {
-                match self.ambient_measurement.sample(self.get_probe()) {
-                    AmbientMeasurementState::Done(ambient_temperature) => {
-                        self.ambient_temperature = Some(ambient_temperature);
-                        #[cfg(feature = "simulate")]
-                        {
-                            self.boiler_simulator.ambient_temperature = ambient_temperature;
-                        }
-                        log::debug!(
-                            "Ambient Temperature = {}",
-                            self.boiler_simulator.ambient_temperature
-                        );
-
-                        log::debug!("Measuring Heatup");
-                        let mut heatup_test = HeatupTest {
-                            sample_time: self.sample_time,
-                            ..Default::default()
-                        };
-                        heatup_test.start(current_temperature, config::AUTOTUNE_TARGET_TEMPERATURE);
-                        self.current_power = config::AUTOTUNE_MAX_POWER;
-                        Some(HeuristicAutoTunerState::MeasureHeatingUp(heatup_test))
-                    }
-                    AmbientMeasurementState::Err(e) => return Err(e),
-                    _ => None,
-                }
+                self.handle_ambient_test(current_temperature)?
             }
-            HeuristicAutoTunerState::MeasureHeatingUp(ref mut test) => {
-                match test.measure(current_temperature) {
-                    HeatupTestState::Done(mut heatup_results) => {
-                        let (estimated_temperature, _mpc) = heatup_results
-                            .estimate_values_from_heatup(self.ambient_temperature.unwrap())?;
-                        let mut ambient_transfer_test = SteadyStateTest::new(
-                            heatup_results,
-                            self.ambient_temperature.unwrap(),
-                        )?;
-                        self.current_power = 0.0;
-                        ambient_transfer_test.start(
-                            config::STEADY_STATE_TEST_TIME,
-                            SettleMode::Value(estimated_temperature),
-                        );
-
-                        log::debug!("Running Steady State test");
-                        Some(HeuristicAutoTunerState::MeasureSteadyState(
-                            ambient_transfer_test,
-                        ))
-                    }
-                    HeatupTestState::Err(e) => return Err(e),
-                    _ => None,
-                }
+            HeuristicAutoTunerState::MeasureHeatingUp(_) => {
+                self.handle_heating_up_test(current_temperature)?
             }
-
-            HeuristicAutoTunerState::MeasureSteadyState(ref mut test) => {
-                match test.measure(self.current_power, current_temperature) {
-                    SteadyStateTestState::Done(test_power) => {
-                        log::debug!("Power: {}", test_power);
-
-                        log::info!("Estimating values from thermal transfer");
-                        let results = test.estimate_values_from_thermal_transfer(
-                            self.ambient_temperature.unwrap(),
-                        )?;
-
-                        self.results = Some(results);
-                        self.print_results();
-
-                        Some(HeuristicAutoTunerState::Done)
-                    }
-                    SteadyStateTestState::Err(e) => return Err(e),
-                    SteadyStateTestState::Settling(SettlingState::Cooling) => {
-                        self.current_power = 0.0;
-                        None
-                    }
-                    SteadyStateTestState::Settling(SettlingState::Heating) => {
-                        self.current_power = config::AUTOTUNE_STEADY_STATE_POWER;
-                        None
-                    }
-                    _ => {
-                        // [ ] just bitbang for now. In the real implementation, activate MPC with the estimated values
-                        self.current_power = if current_temperature >= test.target {
-                            0.0
-                        } else {
-                            config::AUTOTUNE_STEADY_STATE_POWER
-                        };
-                        None
-                    }
-                }
+            HeuristicAutoTunerState::MeasureSteadyState(_) => {
+                self.handle_steady_state(current_temperature)?
             }
             HeuristicAutoTunerState::Done => None,
         };
@@ -826,7 +912,7 @@ impl HeuristicAutoTuner {
         self.boiler_simulator.update(self.current_power, dt);
 
         if let Some(state) = next_state {
-            self.state = state;
+            self.transition_state(state)?;
         }
         if self.state == HeuristicAutoTunerState::Done {
             log::info!("Autotune Completed!");
