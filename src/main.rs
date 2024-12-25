@@ -41,7 +41,7 @@ fn main() -> Result<()> {
         log::info!("Running simulation");
         let mut auto_tuner =
             models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000));
-        if let Err(e) = auto_tuner.simulate() {
+        if let Err(e) = auto_tuner.auto_tune_blocking() {
             log::error!("{:?}", e);
         }
     }
