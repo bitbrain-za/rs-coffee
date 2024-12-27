@@ -116,7 +116,6 @@ impl Boiler {
                 #[cfg(feature = "simulate")]
                 {
                     boiler_simulator.max_power = config::BOILER_POWER;
-                    boiler_simulator.print();
                 }
 
                 loop {
@@ -194,9 +193,8 @@ impl Boiler {
                         }
                     }
                     {
-                        // [ ] fix me
-                        // element.set_duty_cycle(duty_cycle);
-                        // element.tick();
+                        element.set_duty_cycle(duty_cycle);
+                        element.tick();
                     }
                     FreeRtos::delay_ms((config::TIME_DILATION_FACTOR * 1000.0) as u32);
                 }

@@ -38,6 +38,10 @@ where
 
     pub fn set_duty_cycle(&mut self, duty_cycle: f32) {
         let duty_cycle = duty_cycle.clamp(0.0, 1.0);
+        let new_ontime = self.duty_cycle_to_on_time(duty_cycle, None);
+        if new_ontime == self.on_time {
+            return;
+        }
         self.on_time = self.duty_cycle_to_on_time(duty_cycle, None);
     }
 

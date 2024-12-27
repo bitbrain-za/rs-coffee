@@ -15,11 +15,11 @@ mod state_machines;
 use crate::components::boiler::Message as BoilerMessage;
 use anyhow::Result;
 use app_state::System;
-use board::{Action, F32Read, Reading};
+use board::{Action, Element, F32Read, Reading};
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const SIMULATE_AUTO_TUNE: bool = true;
 #[cfg(feature = "simulate")]
