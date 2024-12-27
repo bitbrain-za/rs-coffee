@@ -51,13 +51,13 @@ impl System {
         )
     }
 
-    pub fn message_boiler(&self, message: crate::components::boiler::Message) {
-        if let Some(mailbox) = &self.mailboxes.to_boiler {
-            mailbox.lock().unwrap().push(message);
-        } else {
-            log::error!("Boiler mailbox not set");
-        }
-    }
+    // pub fn message_boiler(&self, message: crate::components::boiler::Message) {
+    //     if let Some(mailbox) = &self.mailboxes.to_boiler {
+    //         mailbox.lock().unwrap().push(message);
+    //     } else {
+    //         log::error!("Boiler mailbox not set");
+    //     }
+    // }
 
     pub fn execute_board_action(&self, action: Action) -> Result<(), String> {
         let system_state = self.system_state.lock().unwrap().clone();

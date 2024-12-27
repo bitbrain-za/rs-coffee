@@ -3,9 +3,8 @@ use crate::board::Element;
 use crate::board::F32Read::BoilerTemperature;
 use crate::config;
 use crate::models::boiler::{BoilerModel, BoilerModelParameters};
-#[cfg(not(feature = "simulate"))]
 use esp_idf_svc::hal::delay::FreeRtos;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{
     sync::{Arc, Mutex},
     thread,
@@ -16,6 +15,9 @@ const UPDATE_INTERVAL: u64 = 1000;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Mode {
     Off,
+    Transparent {
+        power: f32,
+    },
     BangBang {
         upper_threshold: f32,
         lower_threshold: f32,
@@ -23,11 +25,14 @@ pub enum Mode {
     Mpc {
         target: f32,
     },
+    Shutdown,
 }
 
 impl std::fmt::Display for Mode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Mode::Shutdown => write!(f, "Shutdown"),
+            Mode::Transparent { power } => write!(f, "Transparent: {:.2}W", power),
             Mode::Off => write!(f, "Off"),
             Mode::BangBang {
                 upper_threshold,
@@ -48,6 +53,35 @@ pub enum Message {
         initial_ambient_temperature: f32,
         initial_boiler_temperature: f32,
     },
+}
+
+impl Message {
+    fn handle(&self, boiler: &mut BoilerModel, my_mode: &mut Mode) {
+        match *self {
+            Message::Kill => {
+                log::info!("Boiler thread shutting down");
+                *my_mode = Mode::Shutdown;
+            }
+            Message::SetMode(mode) => {
+                // log::info!("Setting mode: {}", mode);
+                *my_mode = mode;
+            }
+            Message::UpdateParameters {
+                parameters,
+                initial_probe_temperature,
+                initial_ambient_temperature,
+                initial_boiler_temperature,
+            } => {
+                log::info!("Updating parameters");
+                boiler.update_parameters(
+                    parameters,
+                    initial_probe_temperature,
+                    initial_boiler_temperature,
+                    initial_ambient_temperature,
+                );
+            }
+        }
+    }
 }
 
 pub type Mailbox = Arc<Mutex<Vec<Message>>>;
@@ -77,9 +111,11 @@ impl Boiler {
         #[cfg(not(feature = "simulate"))]
         let mut element = element;
         #[cfg(feature = "simulate")]
-        let boiler_simulator = crate::models::boiler::BoilerModel::new(Some(25.0));
-        #[cfg(feature = "simulate")]
         let _ = element;
+        #[cfg(feature = "simulate")]
+        let boiler_simulator = crate::models::boiler::BoilerModel::new(Some(25.0));
+
+        let mut next_iteration = Instant::now() + Duration::from_millis(UPDATE_INTERVAL);
 
         let handle = std::thread::Builder::new()
             .name("Boiler".to_string())
@@ -104,38 +140,21 @@ impl Boiler {
                         .collect::<Vec<Message>>();
 
                     for message in messages {
-                        match message {
-                            Message::Kill => {
-                                log::info!("Boiler thread killed");
-                                return;
-                            }
-                            Message::SetMode(mode) => {
-                                log::info!("Setting mode: {}", mode);
-                                my_mode = mode;
-                            }
-                            Message::UpdateParameters {
-                                parameters,
-                                initial_probe_temperature,
-                                initial_ambient_temperature,
-                                initial_boiler_temperature,
-                            } => {
-                                log::info!("Updating parameters");
-                                my_boiler_model.update_parameters(
-                                    parameters,
-                                    initial_probe_temperature,
-                                    initial_boiler_temperature,
-                                    initial_ambient_temperature,
-                                );
-                            }
-                        }
+                        message.handle(&mut my_boiler_model, &mut my_mode);
                     }
 
                     duty_cycle = match my_mode {
+                        Mode::Shutdown => break,
                         Mode::Off => 0.0,
+                        Mode::Transparent { power } => power / config::BOILER_POWER * 100.0,
                         Mode::BangBang {
                             upper_threshold,
                             lower_threshold,
                         } => {
+                            if next_iteration > Instant::now() {
+                                continue;
+                            }
+                            next_iteration += Duration::from_millis(UPDATE_INTERVAL);
                             let probe_temperature = system.read_f32(BoilerTemperature);
                             if probe_temperature >= upper_threshold {
                                 0.0
@@ -146,6 +165,9 @@ impl Boiler {
                             }
                         }
                         Mode::Mpc { target } => {
+                            if next_iteration > Instant::now() {
+                                continue;
+                            }
                             let probe_temperature = system.read_f32(BoilerTemperature);
                             let power = my_boiler_model.control(
                                 probe_temperature,
@@ -155,6 +177,7 @@ impl Boiler {
                             );
 
                             my_boiler_model.update(power, Duration::from_millis(UPDATE_INTERVAL));
+                            next_iteration += Duration::from_millis(UPDATE_INTERVAL);
                             my_boiler_model.get_duty_cycle()
                         }
                     };
@@ -179,7 +202,7 @@ impl Boiler {
                                 .set_temperature(probe);
                         }
 
-                        esp_idf_svc::hal::delay::FreeRtos::delay_ms(10);
+                        FreeRtos::delay_ms(10);
                     }
                     #[cfg(not(feature = "simulate"))]
                     {

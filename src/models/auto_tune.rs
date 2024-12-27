@@ -1,10 +1,11 @@
 use super::{Temperature, Watts};
-use esp_idf_hal::delay::FreeRtos;
-
+use crate::components::boiler::{Message as ElementMessage, Mode as ElementMode};
 use crate::{
+    app_state::System,
     config,
     models::boiler::{BoilerModel, BoilerModelParameters},
 };
+use esp_idf_hal::delay::FreeRtos;
 use std::time::{Duration, Instant};
 
 fn convert_to_dilated_time(duration: Duration) -> Duration {
@@ -46,9 +47,9 @@ fn elapsed_as_secs_f32_with_dilation(instant: Instant) -> f32 {
 enum HeuristicAutoTunerState {
     #[default]
     Init,
-    MeasureAmbient,
-    MeasureHeatingUp(HeatupTest),
-    MeasureSteadyState(SteadyStateTest),
+    MeasureAmbient,                      // 0% - 10%
+    MeasureHeatingUp(HeatupTest),        // 10% - 40%
+    MeasureSteadyState(SteadyStateTest), // 40% - 100%
     Done,
 }
 
@@ -131,7 +132,6 @@ enum Mode {
     Setup,
 }
 
-#[derive(Default)]
 pub struct HeuristicAutoTuner {
     state: HeuristicAutoTunerState,
     sample_time: Duration,
@@ -140,7 +140,11 @@ pub struct HeuristicAutoTuner {
     results: Option<BoilerModelParameters>,
     ambient_measurement: AmbientTest,
     current_power: Watts,
+    element_power: Option<Watts>,
     modeled_temperature: Temperature,
+    percentage_complete: f32,
+    system: System,
+    pub boiler_mailbox: Option<crate::components::boiler::Mailbox>,
 }
 
 pub struct AmbientTest {
@@ -679,23 +683,74 @@ impl SteadyStateTest {
 }
 
 impl HeuristicAutoTuner {
-    pub fn new(sample_time: Duration) -> Self {
+    pub fn new(sample_time: Duration, system: System) -> Self {
         let mut boiler_simulator = BoilerModel::new(Some(25.0));
         boiler_simulator.max_power = config::AUTOTUNE_MAX_POWER;
         Self {
             sample_time,
             boiler_simulator,
-            ..Default::default()
+            state: HeuristicAutoTunerState::default(),
+            ambient_temperature: None,
+            results: None,
+            ambient_measurement: AmbientTest::default(),
+            current_power: 0.0,
+            element_power: None,
+            modeled_temperature: 0.0,
+            percentage_complete: 0.0,
+            system,
+            boiler_mailbox: None,
         }
     }
 
     fn get_probe(&self) -> Temperature {
         // self.boiler_simulator.get_noisy_probe()
-        self.boiler_simulator.probe_temperature
+        // self.boiler_simulator.probe_temperature
+        self.system
+            .read_f32(crate::board::F32Read::BoilerTemperature)
     }
 
     pub fn get_model_boiler_temperature(&self) -> Temperature {
         self.modeled_temperature
+    }
+
+    fn set_percentage_complete(&mut self, percentage: f32) {
+        self.percentage_complete = percentage;
+    }
+
+    fn increment_percentage_up_to(&mut self, percentage: f32, max: f32) {
+        self.percentage_complete += percentage;
+        if self.percentage_complete > max {
+            self.percentage_complete = max;
+        }
+    }
+
+    fn set_element_power(&mut self, power: Watts) {
+        if self.element_power == Some(power) {
+            return;
+        }
+        if let Some(mailbox) = &self.boiler_mailbox {
+            self.element_power = Some(power);
+            mailbox
+                .lock()
+                .unwrap()
+                .push(ElementMessage::SetMode(ElementMode::Transparent { power }));
+        }
+    }
+
+    fn set_element_mpc(&mut self, mpc: BoilerModelParameters) {
+        let ambient_temperature = self.ambient_temperature.unwrap_or(config::STAND_IN_AMBIENT);
+        self.element_power = None;
+        let current_temperature = self.get_probe();
+
+        if let Some(mailbox) = &self.boiler_mailbox {
+            let message = ElementMessage::UpdateParameters {
+                parameters: mpc,
+                initial_probe_temperature: current_temperature,
+                initial_ambient_temperature: ambient_temperature,
+                initial_boiler_temperature: self.modeled_temperature,
+            };
+            mailbox.lock().unwrap().push(message);
+        }
     }
 
     pub fn print_results(&self) {
@@ -776,6 +831,7 @@ impl HeuristicAutoTuner {
         if let HeuristicAutoTunerState::MeasureAmbient = self.state {
             match self.ambient_measurement.sample(self.get_probe()) {
                 AmbientMeasurementState::Done(ambient_temperature) => {
+                    self.set_percentage_complete(9.0);
                     self.ambient_temperature = Some(ambient_temperature);
                     #[cfg(feature = "simulate")]
                     {
@@ -793,10 +849,14 @@ impl HeuristicAutoTuner {
                     };
                     heatup_test.start(current_temperature, config::AUTOTUNE_TARGET_TEMPERATURE);
                     self.current_power = config::AUTOTUNE_MAX_POWER;
+                    self.set_percentage_complete(10.0);
                     Ok(Some(HeuristicAutoTunerState::MeasureHeatingUp(heatup_test)))
                 }
                 AmbientMeasurementState::Err(e) => Err(e),
-                _ => Ok(None),
+                _ => {
+                    self.set_percentage_complete(5.0);
+                    Ok(None)
+                }
             }
         } else {
             Err(Error::UnableToPerformTest(
@@ -824,12 +884,16 @@ impl HeuristicAutoTuner {
                     self.modeled_temperature = estimated_temperature;
 
                     log::debug!("Running Steady State test");
+                    self.set_percentage_complete(40.0);
                     Ok(Some(HeuristicAutoTunerState::MeasureSteadyState(
                         ambient_transfer_test,
                     )))
                 }
                 HeatupTestState::Err(e) => Err(e),
-                _ => Ok(None),
+                _ => {
+                    self.increment_percentage_up_to(1.0, 40.0);
+                    Ok(None)
+                }
             }
         } else {
             Err(Error::UnableToPerformTest(
@@ -854,15 +918,20 @@ impl HeuristicAutoTuner {
                     self.results = Some(results);
                     self.print_results();
 
+                    self.set_percentage_complete(100.0);
                     Ok(Some(HeuristicAutoTunerState::Done))
                 }
                 SteadyStateTestState::Err(e) => Err(e),
                 SteadyStateTestState::Settling(SettlingState::Cooling) => {
+                    self.increment_percentage_up_to(0.1, 70.0);
                     self.current_power = 0.0;
+                    self.set_element_power(self.current_power);
                     Ok(None)
                 }
                 SteadyStateTestState::Settling(SettlingState::Heating) => {
+                    self.increment_percentage_up_to(0.1, 70.0);
                     self.current_power = config::AUTOTUNE_STEADY_STATE_POWER;
+                    self.set_element_power(self.current_power);
                     Ok(None)
                 }
                 _ => {
@@ -872,6 +941,7 @@ impl HeuristicAutoTuner {
                     } else {
                         config::AUTOTUNE_STEADY_STATE_POWER
                     };
+                    self.increment_percentage_up_to(0.1, 90.0);
                     Ok(None)
                 }
             }
@@ -883,8 +953,6 @@ impl HeuristicAutoTuner {
     }
 
     pub fn run(&mut self) -> Result<Option<BoilerModelParameters>, Error> {
-        let dt = self.sample_time;
-
         let current_temperature = self.get_probe();
         let next_state = match self.state {
             HeuristicAutoTunerState::Init => {
@@ -907,30 +975,38 @@ impl HeuristicAutoTuner {
             }
             HeuristicAutoTunerState::Done => None,
         };
-        FreeRtos::delay_ms((1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32);
-        log::trace!(
-            "Updating boiler simulator with power: {}, for {:.2}s",
-            self.current_power,
-            dt.as_secs_f32()
-        );
-        self.boiler_simulator.update(self.current_power, dt);
 
+        self.set_element_power(self.current_power);
         if let Some(state) = next_state {
             self.transition_state(state)?;
         }
         if self.state == HeuristicAutoTunerState::Done {
             log::info!("Autotune Completed!");
+            self.set_element_power(0.0);
             self.print_results();
         }
         Ok(self.results)
     }
 
     pub fn auto_tune_blocking(&mut self) -> Result<(), Error> {
+        let dt = self.sample_time;
         loop {
-            if let Some(rees) = self.run()? {
+            if let Some(res) = self.run()? {
                 log::info!("Simulation completed");
-                log::info!("Results: {:?}", rees);
+                log::info!("Results: {:?}", res);
                 break;
+            }
+            FreeRtos::delay_ms(
+                (1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32,
+            );
+            #[cfg(feature = "simulate")]
+            {
+                log::trace!(
+                    "Updating boiler simulator with power: {}, for {:.2}s",
+                    self.current_power,
+                    dt.as_secs_f32()
+                );
+                self.boiler_simulator.update(self.current_power, dt);
             }
         }
         Ok(())

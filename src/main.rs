@@ -8,6 +8,7 @@ mod config;
 mod gpio;
 mod indicator;
 mod kv_store;
+mod mailbox;
 mod models;
 mod sensors;
 mod state_machines;
@@ -20,7 +21,22 @@ use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
 use std::thread;
 use std::time::Duration;
 
-const SIMULATE_AUTO_TUNE: bool = false;
+const SIMULATE_AUTO_TUNE: bool = true;
+#[cfg(feature = "simulate")]
+fn simulate_auto_tuner(system: System, mailbox: crate::components::boiler::Mailbox) {
+    if SIMULATE_AUTO_TUNE {
+        log::info!("Running simulation");
+        let mut auto_tuner =
+            models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000), system);
+        auto_tuner.boiler_mailbox = Some(mailbox);
+        if let Err(e) = auto_tuner.auto_tune_blocking() {
+            log::error!("{:?}", e);
+        }
+        loop {
+            thread::sleep(Duration::from_secs_f32(config::TIME_DILATION_FACTOR));
+        }
+    }
+}
 
 fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
@@ -38,19 +54,6 @@ fn main() -> Result<()> {
         .unwrap();
 
     log::info!("Starting up");
-
-    #[cfg(feature = "simulate")]
-    if SIMULATE_AUTO_TUNE {
-        log::info!("Running simulation");
-        let mut auto_tuner =
-            models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000));
-        if let Err(e) = auto_tuner.auto_tune_blocking() {
-            log::error!("{:?}", e);
-        }
-        loop {
-            thread::sleep(Duration::from_secs(1));
-        }
-    }
 
     let (mut system, element) = System::new();
     {
@@ -70,17 +73,12 @@ fn main() -> Result<()> {
 
     let mut boiler = components::boiler::Boiler::new(system.clone());
     boiler.start(element);
-    system.mailboxes.to_boiler = Some(boiler.get_mailbox());
 
-    let set_bang_bang = BoilerMessage::SetMode(components::boiler::Mode::BangBang {
-        upper_threshold: 95.0,
-        lower_threshold: 85.0,
-    });
-    system.message_boiler(set_bang_bang);
+    simulate_auto_tuner(system.clone(), boiler.get_mailbox());
 
     let mut loop_interval = Duration::from_millis(1000);
-
-    let mut auto_tuner = models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000));
+    let mut auto_tuner =
+        models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000), system.clone());
 
     loop {
         let system_state = system.system_state.lock().unwrap().clone();
@@ -119,8 +117,11 @@ fn main() -> Result<()> {
                     OperationalState::AutoTuneInit => {
                         log::info!("Auto-tuning boiler");
 
-                        system
-                            .message_boiler(BoilerMessage::SetMode(components::boiler::Mode::Off));
+                        boiler
+                            .get_mailbox()
+                            .lock()
+                            .unwrap()
+                            .push(BoilerMessage::SetMode(components::boiler::Mode::Off));
 
                         system
                             .operational_state
@@ -135,8 +136,10 @@ fn main() -> Result<()> {
                         {
                             loop_interval = Duration::from_millis(10);
                         }
-                        auto_tuner =
-                            models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000));
+                        auto_tuner = models::auto_tune::HeuristicAutoTuner::new(
+                            Duration::from_millis(1000),
+                            system.clone(),
+                        );
                     }
                     OperationalState::AutoTuning => {
                         #[cfg(feature = "simulate")]
@@ -154,7 +157,7 @@ fn main() -> Result<()> {
                                     initial_boiler_temperature: initial_boiler,
                                 };
 
-                                system.message_boiler(message);
+                                boiler.get_mailbox().lock().unwrap().push(message);
 
                                 system
                                     .operational_state
@@ -192,18 +195,29 @@ fn main() -> Result<()> {
                             .execute_board_action(Action::OpenValve(Some(Duration::from_secs(5))));
 
                         let mode = components::boiler::Mode::Mpc { target: 94.0 };
-                        system.message_boiler(BoilerMessage::SetMode(mode));
+                        boiler
+                            .get_mailbox()
+                            .lock()
+                            .unwrap()
+                            .push(BoilerMessage::SetMode(mode));
                     }
                     if button == board::ButtonEnum::HotWater {
                         let mode = components::boiler::Mode::BangBang {
                             upper_threshold: 95.0,
                             lower_threshold: 85.0,
                         };
-                        system.message_boiler(BoilerMessage::SetMode(mode));
+                        boiler
+                            .get_mailbox()
+                            .lock()
+                            .unwrap()
+                            .push(BoilerMessage::SetMode(mode));
                     }
                     if button == board::ButtonEnum::Steam {
-                        system
-                            .message_boiler(BoilerMessage::SetMode(components::boiler::Mode::Off));
+                        boiler
+                            .get_mailbox()
+                            .lock()
+                            .unwrap()
+                            .push(BoilerMessage::SetMode(components::boiler::Mode::Off));
                     }
                 }
             }
