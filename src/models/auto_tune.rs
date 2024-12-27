@@ -1,10 +1,6 @@
 use super::{Temperature, Watts};
 use crate::components::boiler::{Message as ElementMessage, Mode as ElementMode};
-use crate::{
-    app_state::System,
-    config,
-    models::boiler::{BoilerModel, BoilerModelParameters},
-};
+use crate::{app_state::System, config, models::boiler::BoilerModelParameters};
 use esp_idf_hal::delay::FreeRtos;
 use std::time::{Duration, Instant};
 
@@ -132,15 +128,21 @@ enum Mode {
     Setup,
 }
 
+#[derive(PartialEq)]
+enum ElementControlOption {
+    None,
+    Some(Watts),
+    Locked,
+}
+
 pub struct HeuristicAutoTuner {
     state: HeuristicAutoTunerState,
     sample_time: Duration,
     ambient_temperature: Option<Temperature>,
-    boiler_simulator: BoilerModel,
     results: Option<BoilerModelParameters>,
     ambient_measurement: AmbientTest,
     current_power: Watts,
-    element_power: Option<Watts>,
+    element_power: ElementControlOption,
     modeled_temperature: Temperature,
     percentage_complete: f32,
     system: System,
@@ -684,17 +686,14 @@ impl SteadyStateTest {
 
 impl HeuristicAutoTuner {
     pub fn new(sample_time: Duration, system: System) -> Self {
-        let mut boiler_simulator = BoilerModel::new(Some(25.0));
-        boiler_simulator.max_power = config::AUTOTUNE_MAX_POWER;
         Self {
             sample_time,
-            boiler_simulator,
             state: HeuristicAutoTunerState::default(),
             ambient_temperature: None,
             results: None,
             ambient_measurement: AmbientTest::default(),
             current_power: 0.0,
-            element_power: None,
+            element_power: ElementControlOption::None,
             modeled_temperature: 0.0,
             percentage_complete: 0.0,
             system,
@@ -703,8 +702,6 @@ impl HeuristicAutoTuner {
     }
 
     fn get_probe(&self) -> Temperature {
-        // self.boiler_simulator.get_noisy_probe()
-        // self.boiler_simulator.probe_temperature
         self.system
             .read_f32(crate::board::F32Read::BoilerTemperature)
     }
@@ -725,11 +722,13 @@ impl HeuristicAutoTuner {
     }
 
     fn set_element_power(&mut self, power: Watts) {
-        if self.element_power == Some(power) {
+        if self.element_power == ElementControlOption::Some(power)
+            || self.element_power == ElementControlOption::Locked
+        {
             return;
         }
         if let Some(mailbox) = &self.boiler_mailbox {
-            self.element_power = Some(power);
+            self.element_power = ElementControlOption::Some(power);
             mailbox
                 .lock()
                 .unwrap()
@@ -739,7 +738,7 @@ impl HeuristicAutoTuner {
 
     fn set_element_mpc(&mut self, mpc: BoilerModelParameters) {
         let ambient_temperature = self.ambient_temperature.unwrap_or(config::STAND_IN_AMBIENT);
-        self.element_power = None;
+        self.element_power = ElementControlOption::Locked;
         let current_temperature = self.get_probe();
 
         if let Some(mailbox) = &self.boiler_mailbox {
@@ -750,46 +749,54 @@ impl HeuristicAutoTuner {
                 initial_boiler_temperature: self.modeled_temperature,
             };
             mailbox.lock().unwrap().push(message);
+
+            let message = ElementMessage::SetMode(ElementMode::Mpc {
+                target: self.modeled_temperature,
+            });
+            mailbox.lock().unwrap().push(message);
         }
     }
 
     pub fn print_results(&self) {
-        let actual_params = self.boiler_simulator.parameters;
-        log::info!("Actual values \n{}", actual_params);
-
         if let Some(results) = &self.results {
             log::info!("Estimated values:\n{}", results);
+            #[cfg(feature = "simulate")]
+            {
+                let actual_params = BoilerModelParameters::default();
+                log::info!("Actual values \n{}", actual_params);
 
-            log::info!(
-                "Error percent:\n{}",
-                [
-                    (
-                        "Thermal Mass",
-                        (actual_params.thermal_mass - results.thermal_mass).abs()
-                            / actual_params.thermal_mass
-                            * 100.0
-                    ),
-                    (
-                        "Ambient Transfer Coefficient",
-                        (actual_params.ambient_transfer_coefficient
-                            - results.ambient_transfer_coefficient)
-                            .abs()
-                            / actual_params.ambient_transfer_coefficient
-                            * 100.0
-                    ),
-                    (
-                        "Probe Responsiveness",
-                        (actual_params.probe_responsiveness - results.probe_responsiveness).abs()
-                            / actual_params.probe_responsiveness
-                            * 100.0
-                    )
-                ]
-                .iter()
-                .map(|(label, x)| format!("{}: {:.2}%", label, x))
-                .collect::<Vec<String>>()
-                .join("\n")
-            );
-            log::info!("");
+                log::info!(
+                    "Error percent:\n{}",
+                    [
+                        (
+                            "Thermal Mass",
+                            (actual_params.thermal_mass - results.thermal_mass).abs()
+                                / actual_params.thermal_mass
+                                * 100.0
+                        ),
+                        (
+                            "Ambient Transfer Coefficient",
+                            (actual_params.ambient_transfer_coefficient
+                                - results.ambient_transfer_coefficient)
+                                .abs()
+                                / actual_params.ambient_transfer_coefficient
+                                * 100.0
+                        ),
+                        (
+                            "Probe Responsiveness",
+                            (actual_params.probe_responsiveness - results.probe_responsiveness)
+                                .abs()
+                                / actual_params.probe_responsiveness
+                                * 100.0
+                        )
+                    ]
+                    .iter()
+                    .map(|(label, x)| format!("{}: {:.2}%", label, x))
+                    .collect::<Vec<String>>()
+                    .join("\n")
+                );
+                log::info!("");
+            }
         }
     }
 
@@ -833,14 +840,7 @@ impl HeuristicAutoTuner {
                 AmbientMeasurementState::Done(ambient_temperature) => {
                     self.set_percentage_complete(9.0);
                     self.ambient_temperature = Some(ambient_temperature);
-                    #[cfg(feature = "simulate")]
-                    {
-                        self.boiler_simulator.ambient_temperature = ambient_temperature;
-                    }
-                    log::debug!(
-                        "Ambient Temperature = {}",
-                        self.boiler_simulator.ambient_temperature
-                    );
+                    log::debug!("Ambient Temperature = {}", ambient_temperature);
 
                     log::debug!("Measuring Heatup");
                     let mut heatup_test = HeatupTest {
@@ -884,6 +884,9 @@ impl HeuristicAutoTuner {
                     self.modeled_temperature = estimated_temperature;
 
                     log::debug!("Running Steady State test");
+                    // [ ] this is not working
+                    // need to be able to get the current power from the element (or have it track power itself)
+                    // self.set_element_mpc(mpc);
                     self.set_percentage_complete(40.0);
                     Ok(Some(HeuristicAutoTunerState::MeasureSteadyState(
                         ambient_transfer_test,
@@ -988,27 +991,16 @@ impl HeuristicAutoTuner {
         Ok(self.results)
     }
 
-    pub fn auto_tune_blocking(&mut self) -> Result<(), Error> {
-        let dt = self.sample_time;
+    pub fn auto_tune_blocking(&mut self) -> Result<BoilerModelParameters, Error> {
         loop {
             if let Some(res) = self.run()? {
                 log::info!("Simulation completed");
                 log::info!("Results: {:?}", res);
-                break;
+                return Ok(res);
             }
             FreeRtos::delay_ms(
                 (1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32,
             );
-            #[cfg(feature = "simulate")]
-            {
-                log::trace!(
-                    "Updating boiler simulator with power: {}, for {:.2}s",
-                    self.current_power,
-                    dt.as_secs_f32()
-                );
-                self.boiler_simulator.update(self.current_power, dt);
-            }
         }
-        Ok(())
     }
 }

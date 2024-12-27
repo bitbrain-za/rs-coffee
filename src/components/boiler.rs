@@ -56,7 +56,6 @@ impl Message {
     fn handle(&self, boiler: &mut BoilerModel, my_mode: &mut Mode) {
         match *self {
             Message::SetMode(mode) => {
-                // log::info!("Setting mode: {}", mode);
                 *my_mode = mode;
             }
             Message::UpdateParameters {
@@ -65,7 +64,6 @@ impl Message {
                 initial_ambient_temperature,
                 initial_boiler_temperature,
             } => {
-                log::info!("Updating parameters");
                 boiler.update_parameters(
                     parameters,
                     initial_probe_temperature,
@@ -101,10 +99,7 @@ impl Boiler {
         let model = BoilerModel::new(Some(config::STAND_IN_AMBIENT));
         let my_mailbox = self.mailbox.clone();
         let system = self.system.clone();
-        #[cfg(not(feature = "simulate"))]
         let mut element = element;
-        #[cfg(feature = "simulate")]
-        let _ = element;
         #[cfg(feature = "simulate")]
         let boiler_simulator = crate::models::boiler::BoilerModel::new(Some(25.0));
 
@@ -138,7 +133,7 @@ impl Boiler {
 
                     duty_cycle = match my_mode {
                         Mode::Off => 0.0,
-                        Mode::Transparent { power } => power / config::BOILER_POWER * 100.0,
+                        Mode::Transparent { power } => power / config::BOILER_POWER,
                         Mode::BangBang {
                             upper_threshold,
                             lower_threshold,
@@ -146,12 +141,14 @@ impl Boiler {
                             if next_iteration > Instant::now() {
                                 continue;
                             }
-                            next_iteration += Duration::from_millis(UPDATE_INTERVAL);
+                            next_iteration += Duration::from_secs_f32(
+                                UPDATE_INTERVAL as f32 * config::TIME_DILATION_FACTOR / 1000.0,
+                            );
                             let probe_temperature = system.read_f32(BoilerTemperature);
                             if probe_temperature >= upper_threshold {
                                 0.0
                             } else if probe_temperature <= lower_threshold {
-                                100.0
+                                1.0
                             } else {
                                 duty_cycle
                             }
@@ -169,7 +166,9 @@ impl Boiler {
                             );
 
                             my_boiler_model.update(power, Duration::from_millis(UPDATE_INTERVAL));
-                            next_iteration += Duration::from_millis(UPDATE_INTERVAL);
+                            next_iteration += Duration::from_secs_f32(
+                                UPDATE_INTERVAL as f32 * config::TIME_DILATION_FACTOR / 1000.0,
+                            );
                             my_boiler_model.get_duty_cycle()
                         }
                     };
@@ -177,7 +176,7 @@ impl Boiler {
                     #[cfg(feature = "simulate")]
                     {
                         let (_, probe) = boiler_simulator.update(
-                            duty_cycle * boiler_simulator.max_power / 100.0,
+                            duty_cycle * boiler_simulator.max_power,
                             Duration::from_millis(UPDATE_INTERVAL),
                         );
 
@@ -193,19 +192,13 @@ impl Boiler {
                                 .unwrap()
                                 .set_temperature(probe);
                         }
-
-                        FreeRtos::delay_ms((config::TIME_DILATION_FACTOR * 1000.0) as u32);
                     }
-                    #[cfg(not(feature = "simulate"))]
                     {
-                        element.set_duty_cycle(duty_cycle);
-                        let mut next_update: Vec<Duration> =
-                            vec![Duration::from_millis(UPDATE_INTERVAL)];
-                        if let Some(duration) = element.tick() {
-                            next_update.push(duration);
-                        }
-                        FreeRtos::delay_ms(next_update.iter().min().unwrap().as_millis() as u32);
+                        // [ ] fix me
+                        // element.set_duty_cycle(duty_cycle);
+                        // element.tick();
                     }
+                    FreeRtos::delay_ms((config::TIME_DILATION_FACTOR * 1000.0) as u32);
                 }
             })
             .expect("Failed to spawn output thread");

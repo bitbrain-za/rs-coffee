@@ -27,13 +27,24 @@ fn simulate_auto_tuner(system: System, mailbox: crate::components::boiler::Mailb
     if SIMULATE_AUTO_TUNE {
         log::info!("Running simulation");
         let mut auto_tuner =
-            models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000), system);
-        auto_tuner.boiler_mailbox = Some(mailbox);
-        if let Err(e) = auto_tuner.auto_tune_blocking() {
-            log::error!("{:?}", e);
-        }
-        loop {
-            thread::sleep(Duration::from_secs_f32(config::TIME_DILATION_FACTOR));
+            models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000), system.clone());
+        auto_tuner.boiler_mailbox = Some(mailbox.clone());
+        match auto_tuner.auto_tune_blocking() {
+            Ok(res) => {
+                let probe_temperature = system.read_f32(board::F32Read::BoilerTemperature);
+                let message = components::boiler::Message::UpdateParameters {
+                    parameters: res,
+                    initial_probe_temperature: probe_temperature,
+                    initial_ambient_temperature: config::STAND_IN_AMBIENT,
+                    initial_boiler_temperature: auto_tuner.get_model_boiler_temperature(),
+                };
+                mailbox.lock().unwrap().push(message);
+                let message = components::boiler::Message::SetMode(components::boiler::Mode::Mpc {
+                    target: 94.0,
+                });
+                mailbox.lock().unwrap().push(message);
+            }
+            Err(e) => log::error!("{:?}", e),
         }
     }
 }
@@ -55,7 +66,7 @@ fn main() -> Result<()> {
 
     log::info!("Starting up");
 
-    let (mut system, element) = System::new();
+    let (system, element) = System::new();
     {
         let board = system.board.lock().unwrap();
         *board.outputs.boiler_duty_cycle.lock().unwrap() = 0.5;
@@ -63,13 +74,6 @@ fn main() -> Result<()> {
         *board.outputs.solenoid.lock().unwrap() =
             gpio::relay::State::on(Some(Duration::from_secs(5)));
     }
-
-    system
-        .system_state
-        .lock()
-        .unwrap()
-        .transition(SystemTransition::Idle)
-        .expect("Invalid transition :(");
 
     let mut boiler = components::boiler::Boiler::new(system.clone());
     boiler.start(element);
@@ -79,6 +83,13 @@ fn main() -> Result<()> {
     let mut loop_interval = Duration::from_millis(1000);
     let mut auto_tuner =
         models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000), system.clone());
+
+    system
+        .system_state
+        .lock()
+        .unwrap()
+        .transition(SystemTransition::Idle)
+        .expect("Invalid transition :(");
 
     loop {
         let system_state = system.system_state.lock().unwrap().clone();

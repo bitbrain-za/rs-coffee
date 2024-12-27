@@ -138,7 +138,7 @@ impl BoilerModel {
         ambient_temperature: Temperature,
     ) {
         self.parameters = parameters;
-        self.parameters.save().unwrap();
+        // self.parameters.save().unwrap();
 
         self.ambient_temperature = ambient_temperature;
         self.boiler_temperature = boiler_temperature;
