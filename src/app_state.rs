@@ -8,10 +8,16 @@ use std::default::Default;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
+pub struct Mailboxes {
+    pub to_boiler: Option<crate::components::boiler::Mailbox>,
+}
+
+#[derive(Clone)]
 pub struct System {
     pub system_state: Arc<Mutex<SystemState>>,
     pub operational_state: Arc<Mutex<OperationalState>>,
     pub board: Arc<Mutex<Board<'static>>>,
+    pub mailboxes: Mailboxes,
 }
 
 impl System {
@@ -26,9 +32,7 @@ impl System {
         {
             log::info!("Steam button pressed during startup, starting auto-tune");
             operational_state
-                .transition(Transitions::StartAutoTune(std::time::Duration::from_secs(
-                    30 * 60,
-                )))
+                .transition(Transitions::StartAutoTune)
                 .expect("Failed to set operational state");
         } else {
             operational_state
@@ -41,9 +45,18 @@ impl System {
                 system_state: Arc::new(Mutex::new(SystemState::default())),
                 operational_state,
                 board,
+                mailboxes: Mailboxes { to_boiler: None },
             },
             element,
         )
+    }
+
+    pub fn message_boiler(&self, message: crate::components::boiler::Message) {
+        if let Some(mailbox) = &self.mailboxes.to_boiler {
+            mailbox.lock().unwrap().push(message);
+        } else {
+            log::error!("Boiler mailbox not set");
+        }
     }
 
     pub fn execute_board_action(&self, action: Action) -> Result<(), String> {

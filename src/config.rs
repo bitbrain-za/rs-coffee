@@ -19,6 +19,7 @@ pub const LED_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 pub const IDLE_TEMPERATURE: f32 = 60.0;
 pub const BOILER_POWER: f32 = 2000.0;
 pub const INITIAL_TEMPERATURE: f32 = 25.0;
+pub const STAND_IN_AMBIENT: f32 = 25.0;
 
 pub const AUTOTUNE_MAX_POWER: f32 = 1000.0;
 pub const AUTOTUNE_STEADY_STATE_POWER: f32 = AUTOTUNE_MAX_POWER * 0.5;
@@ -26,3 +27,5 @@ pub const AUTOTUNE_TARGET_TEMPERATURE: f32 = 94.0;
 pub const STEADY_STATE_TEST_TIME: Duration = Duration::from_secs(600);
 #[cfg(feature = "simulate")]
 pub const TIME_DILATION_FACTOR: f32 = 0.01;
+
+pub const MPC_SMOOTHING_FACTOR: f32 = 0.5;

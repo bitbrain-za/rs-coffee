@@ -1,8 +1,8 @@
 use crate::app_state::System;
 use crate::board::Element;
 use crate::board::F32Read::BoilerTemperature;
-#[cfg(not(feature = "simulate"))]
-use crate::components::boiler;
+use crate::config;
+use crate::models::boiler::{BoilerModel, BoilerModelParameters};
 #[cfg(not(feature = "simulate"))]
 use esp_idf_svc::hal::delay::FreeRtos;
 use std::time::Duration;
@@ -13,7 +13,7 @@ use std::{
 
 const UPDATE_INTERVAL: u64 = 1000;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Mode {
     Off,
     BangBang {
@@ -21,9 +21,6 @@ pub enum Mode {
         lower_threshold: f32,
     },
     Mpc {
-        target: f32,
-    },
-    AutoTune {
         target: f32,
     },
 }
@@ -37,36 +34,45 @@ impl std::fmt::Display for Mode {
                 lower_threshold,
             } => write!(f, "BangBang: {} - {}", upper_threshold, lower_threshold),
             Mode::Mpc { target } => write!(f, "Mpc: {}", target),
-            Mode::AutoTune { target } => write!(f, "AutoTune: {}", target),
         }
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum Message {
+    Kill,
+    SetMode(Mode),
+    UpdateParameters {
+        parameters: BoilerModelParameters,
+        initial_probe_temperature: f32,
+        initial_ambient_temperature: f32,
+        initial_boiler_temperature: f32,
+    },
+}
+
+pub type Mailbox = Arc<Mutex<Vec<Message>>>;
 pub struct Boiler {
-    pub mode: Arc<Mutex<Mode>>,
+    mailbox: Mailbox,
     pub system: System,
     handle: Option<thread::JoinHandle<()>>,
-    kill_switch: Arc<Mutex<bool>>,
 }
 
 impl Boiler {
     pub fn new(system: System) -> Self {
         Self {
             system,
-            mode: Arc::new(Mutex::new(Mode::Off)),
-            kill_switch: Arc::new(Mutex::new(false)),
             handle: None,
+            mailbox: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
-    pub fn set(&mut self, mode: Mode) {
-        log::debug!("Setting: {}", mode);
-        *self.mode.lock().unwrap() = mode
+    pub fn get_mailbox(&self) -> Mailbox {
+        self.mailbox.clone()
     }
 
     pub fn start(&mut self, element: Element) {
-        let kill_switch_clone = self.kill_switch.clone();
-        let my_mode = self.mode.clone();
+        let model = BoilerModel::new(Some(config::STAND_IN_AMBIENT));
+        let my_mailbox = self.mailbox.clone();
         let system = self.system.clone();
         #[cfg(not(feature = "simulate"))]
         let mut element = element;
@@ -78,7 +84,9 @@ impl Boiler {
         let handle = std::thread::Builder::new()
             .name("Boiler".to_string())
             .spawn(move || {
+                let mut my_mode = Mode::Off;
                 let mut duty_cycle = 0.0;
+                let mut my_boiler_model = model;
                 #[cfg(feature = "simulate")]
                 let mut boiler_simulator = boiler_simulator;
                 #[cfg(feature = "simulate")]
@@ -88,15 +96,41 @@ impl Boiler {
                 }
 
                 loop {
-                    if *kill_switch_clone.lock().unwrap() {
-                        log::info!("Boiler thread killed");
-                        *my_mode.lock().unwrap() = Mode::Off;
-                        return;
+                    /* Check for messages */
+                    let messages = my_mailbox
+                        .lock()
+                        .unwrap()
+                        .drain(..)
+                        .collect::<Vec<Message>>();
+
+                    for message in messages {
+                        match message {
+                            Message::Kill => {
+                                log::info!("Boiler thread killed");
+                                return;
+                            }
+                            Message::SetMode(mode) => {
+                                log::info!("Setting mode: {}", mode);
+                                my_mode = mode;
+                            }
+                            Message::UpdateParameters {
+                                parameters,
+                                initial_probe_temperature,
+                                initial_ambient_temperature,
+                                initial_boiler_temperature,
+                            } => {
+                                log::info!("Updating parameters");
+                                my_boiler_model.update_parameters(
+                                    parameters,
+                                    initial_probe_temperature,
+                                    initial_boiler_temperature,
+                                    initial_ambient_temperature,
+                                );
+                            }
+                        }
                     }
 
-                    let mode = *my_mode.lock().unwrap();
-
-                    duty_cycle = match mode {
+                    duty_cycle = match my_mode {
                         Mode::Off => 0.0,
                         Mode::BangBang {
                             upper_threshold,
@@ -112,12 +146,16 @@ impl Boiler {
                             }
                         }
                         Mode::Mpc { target } => {
-                            let _ = target;
-                            todo!();
-                        }
-                        Mode::AutoTune { target } => {
-                            let _ = target;
-                            todo!();
+                            let probe_temperature = system.read_f32(BoilerTemperature);
+                            let power = my_boiler_model.control(
+                                probe_temperature,
+                                config::STAND_IN_AMBIENT,
+                                target,
+                                Duration::from_millis(UPDATE_INTERVAL),
+                            );
+
+                            my_boiler_model.update(power, Duration::from_millis(UPDATE_INTERVAL));
+                            my_boiler_model.get_duty_cycle()
                         }
                     };
 
@@ -125,7 +163,7 @@ impl Boiler {
                     {
                         let (_, probe) = boiler_simulator.update(
                             duty_cycle * boiler_simulator.max_power / 100.0,
-                            Duration::from_millis(1000),
+                            Duration::from_millis(UPDATE_INTERVAL),
                         );
 
                         {

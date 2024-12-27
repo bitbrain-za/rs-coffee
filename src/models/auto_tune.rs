@@ -1,3 +1,4 @@
+use super::{Temperature, Watts};
 use esp_idf_hal::delay::FreeRtos;
 
 use crate::{
@@ -40,8 +41,6 @@ fn elapsed_as_secs_f32_with_dilation(instant: Instant) -> f32 {
     #[cfg(not(feature = "simulate"))]
     return instant.elapsed().as_secs_f32();
 }
-
-type Temperature = f32;
 
 #[derive(Default)]
 enum HeuristicAutoTunerState {
@@ -140,7 +139,8 @@ pub struct HeuristicAutoTuner {
     boiler_simulator: BoilerModel,
     results: Option<BoilerModelParameters>,
     ambient_measurement: AmbientTest,
-    current_power: f32,
+    current_power: Watts,
+    modeled_temperature: Temperature,
 }
 
 pub struct AmbientTest {
@@ -225,7 +225,7 @@ struct HeatupTestData {
     time_to_halfway_point: Duration,
 
     // used?
-    power: f32,
+    power: Watts,
     elapsed_time_heating: Duration,
 }
 
@@ -434,7 +434,7 @@ enum SteadyStateTestState {
     Init,
     Settling(SettlingState),
     Busy,
-    Done(f32),
+    Done(Watts),
     Err(Error),
 }
 
@@ -566,7 +566,7 @@ impl SteadyStateTest {
 
     fn measure(
         &mut self,
-        heater_power: f32,
+        heater_power: Watts,
         current_temperature: Temperature,
     ) -> SteadyStateTestState {
         if let SteadyStateTestState::Settling(state) = self.state {
@@ -632,7 +632,7 @@ impl SteadyStateTest {
         SteadyStateTestState::Busy
     }
 
-    fn power(&self) -> f32 {
+    fn power(&self) -> Watts {
         self.total_energy / self.test_duration.as_secs_f32()
     }
 
@@ -694,6 +694,10 @@ impl HeuristicAutoTuner {
         self.boiler_simulator.probe_temperature
     }
 
+    pub fn get_model_boiler_temperature(&self) -> Temperature {
+        self.modeled_temperature
+    }
+
     pub fn print_results(&self) {
         let actual_params = self.boiler_simulator.parameters;
         log::info!("Actual values \n{}", actual_params);
@@ -735,11 +739,9 @@ impl HeuristicAutoTuner {
     }
 
     fn transition_state(&mut self, state: HeuristicAutoTunerState) -> Result<(), Error> {
-        log::debug!("Transitioning from {} to {}", self.state, state);
-
         let current = &self.state;
 
-        if matches!(
+        if !matches!(
             (current, &state),
             (
                 HeuristicAutoTunerState::Init,
@@ -755,15 +757,16 @@ impl HeuristicAutoTuner {
                 HeuristicAutoTunerState::Done
             )
         ) {
-            self.state = state;
-            Ok(())
-        } else {
             log::error!("Invalid state transition from {} to {}", current, state);
-            Err(Error::UnableToPerformTest(format!(
+            return Err(Error::UnableToPerformTest(format!(
                 "Invalid state transition from {} to {}",
                 current, state
-            )))
+            )));
         }
+
+        log::debug!("Transitioning from {} to {}", self.state, state);
+        self.state = state;
+        Ok(())
     }
 
     fn handle_ambient_test(
@@ -818,6 +821,7 @@ impl HeuristicAutoTuner {
                         config::STEADY_STATE_TEST_TIME,
                         SettleMode::Value(estimated_temperature),
                     );
+                    self.modeled_temperature = estimated_temperature;
 
                     log::debug!("Running Steady State test");
                     Ok(Some(HeuristicAutoTunerState::MeasureSteadyState(
