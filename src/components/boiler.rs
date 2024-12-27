@@ -25,13 +25,11 @@ pub enum Mode {
     Mpc {
         target: f32,
     },
-    Shutdown,
 }
 
 impl std::fmt::Display for Mode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Mode::Shutdown => write!(f, "Shutdown"),
             Mode::Transparent { power } => write!(f, "Transparent: {:.2}W", power),
             Mode::Off => write!(f, "Off"),
             Mode::BangBang {
@@ -45,7 +43,6 @@ impl std::fmt::Display for Mode {
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Message {
-    Kill,
     SetMode(Mode),
     UpdateParameters {
         parameters: BoilerModelParameters,
@@ -58,10 +55,6 @@ pub enum Message {
 impl Message {
     fn handle(&self, boiler: &mut BoilerModel, my_mode: &mut Mode) {
         match *self {
-            Message::Kill => {
-                log::info!("Boiler thread shutting down");
-                *my_mode = Mode::Shutdown;
-            }
             Message::SetMode(mode) => {
                 // log::info!("Setting mode: {}", mode);
                 *my_mode = mode;
@@ -127,7 +120,7 @@ impl Boiler {
                 let mut boiler_simulator = boiler_simulator;
                 #[cfg(feature = "simulate")]
                 {
-                    boiler_simulator.max_power = 1000.0;
+                    boiler_simulator.max_power = config::BOILER_POWER;
                     boiler_simulator.print();
                 }
 
@@ -144,7 +137,6 @@ impl Boiler {
                     }
 
                     duty_cycle = match my_mode {
-                        Mode::Shutdown => break,
                         Mode::Off => 0.0,
                         Mode::Transparent { power } => power / config::BOILER_POWER * 100.0,
                         Mode::BangBang {
@@ -202,7 +194,7 @@ impl Boiler {
                                 .set_temperature(probe);
                         }
 
-                        FreeRtos::delay_ms(10);
+                        FreeRtos::delay_ms((config::TIME_DILATION_FACTOR * 1000.0) as u32);
                     }
                     #[cfg(not(feature = "simulate"))]
                     {
