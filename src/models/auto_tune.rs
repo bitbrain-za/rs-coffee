@@ -736,7 +736,7 @@ impl HeuristicAutoTuner {
         }
     }
 
-    fn set_element_mpc(&mut self, mpc: BoilerModelParameters) {
+    fn _set_element_mpc(&mut self, mpc: BoilerModelParameters) {
         let ambient_temperature = self.ambient_temperature.unwrap_or(config::STAND_IN_AMBIENT);
         self.element_power = ElementControlOption::Locked;
         let current_temperature = self.get_probe();

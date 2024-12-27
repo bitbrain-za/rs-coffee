@@ -126,10 +126,6 @@ impl BoilerModel {
         }
     }
 
-    pub fn print(&self) {
-        log::info!("Boiler Model Parameters:\n{}", self.parameters);
-    }
-
     pub fn update_parameters(
         &mut self,
         parameters: BoilerModelParameters,

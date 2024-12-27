@@ -68,6 +68,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_high(&self) -> bool {
         self.pin.is_high()
     }
@@ -78,6 +79,7 @@ where
             .expect("failed to enable interrupt");
     }
 
+    #[allow(dead_code)]
     pub fn disable(&mut self) {
         self.pin
             .disable_interrupt()

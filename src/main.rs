@@ -1,6 +1,6 @@
 // [ ] Go through all the "expects" and change them to put the system into an error/panic state
 // [ ] Remove this later, just silence warnings while we're doing large scale writing
-// #![allow(dead_code)]
+#![allow(dead_code)]
 mod app_state;
 mod board;
 mod components;
@@ -8,18 +8,17 @@ mod config;
 mod gpio;
 mod indicator;
 mod kv_store;
-mod mailbox;
 mod models;
 mod sensors;
 mod state_machines;
 use crate::components::boiler::Message as BoilerMessage;
 use anyhow::Result;
 use app_state::System;
-use board::{Action, Element, F32Read, Reading};
+use board::{Action, F32Read, Reading};
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const SIMULATE_AUTO_TUNE: bool = true;
 #[cfg(feature = "simulate")]

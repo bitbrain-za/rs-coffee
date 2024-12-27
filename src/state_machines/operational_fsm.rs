@@ -1,7 +1,6 @@
 use super::traits::*;
 use super::FsmError as Error;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub enum OperationalState {
