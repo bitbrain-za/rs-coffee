@@ -1,5 +1,6 @@
 use crate::app_state::ApiState;
 use crate::schemas::drink::Drink;
+use anyhow::Result;
 use embedded_svc::{
     http::{Headers, Method},
     io::{Read, Write},
@@ -25,15 +26,19 @@ macro_rules! handle_request_data {
     }};
 }
 
-macro_rules! success {
-    () => {
-        Ok(serde_json::json!({ "status": "success" }).to_string())
-    };
+macro_rules! ok {
+    ($req:expr) => {{
+        let result = serde_json::json!({ "status": "success"}).to_string();
+        $req.into_ok_response()?.write_all(result.as_bytes())?;
+        Ok(())
+    }};
 }
 
-macro_rules! ok {
+macro_rules! ok_with_data {
     ($req:expr, $resp:expr) => {{
-        $req.into_ok_response()?.write_all($resp.as_bytes())?;
+        let result = serde_json::json!({ "status": "success", "message": $resp }).to_string();
+        $req.into_ok_response()?.write_all(result.as_bytes())?;
+        Ok(())
     }};
 }
 
@@ -41,6 +46,7 @@ macro_rules! bad_request {
     ($req:expr, $err:expr) => {{
         $req.into_status_response(400)?
             .write_all($err.to_string().as_bytes())?;
+        Ok(())
     }};
 }
 
@@ -56,27 +62,26 @@ pub fn create_server(system: ApiState) -> anyhow::Result<EspHttpServer<'static>>
 }
 
 fn create_router(server: &mut EspHttpServer<'static>, system: ApiState) -> anyhow::Result<()> {
-    server.fn_handler("/api/v1/version", Method::Get, |req| {
+    server.fn_handler::<anyhow::Error, _>("/api/v1/version", Method::Get, |req| {
         let resp = version();
-        req.into_ok_response()?
-            .write_all(resp.as_bytes())
-            .map(|_| ())
+        ok_with_data!(req, resp)
     })?;
 
     let my_system = system.clone();
-    server.fn_handler("/api/v1/echo", Method::Get, move |req| {
-        let resp = echo_get(my_system.clone());
-        req.into_ok_response()?
-            .write_all(resp.as_bytes())
-            .map(|_| ())
-    })?;
+    server.fn_handler::<anyhow::Error, _>(
+        "/api/v1/echo",
+        Method::Get,
+        move |req| match echo_get(my_system.clone()) {
+            Ok(data) => ok_with_data!(req, data),
+            Err(e) => bad_request!(req, e),
+        },
+    )?;
 
     let my_system = system.clone();
     server.fn_handler::<anyhow::Error, _>("/api/v1/echo", Method::Post, move |mut req| {
         let data = handle_request_data!(req);
         echo_post(&data, my_system.clone());
-        req.into_ok_response()?.write_all("done".as_bytes())?;
-        Ok(())
+        ok!(req)
     })?;
 
     let my_system = system.clone();
@@ -86,10 +91,22 @@ fn create_router(server: &mut EspHttpServer<'static>, system: ApiState) -> anyho
         move |mut req| {
             let data = handle_request_data!(req);
             match put_drink(&data, my_system.clone()) {
-                Ok(message) => ok!(req, message),
+                Ok(message) => ok_with_data!(req, message),
                 Err(e) => bad_request!(req, e),
             }
-            Ok(())
+        },
+    )?;
+
+    let my_system = system.clone();
+    server.fn_handler::<anyhow::Error, _>(
+        "/api/v1/coffee/drink",
+        Method::Post,
+        move |mut req| {
+            let data = handle_request_data!(req);
+            match post_drink(&data, my_system.clone()) {
+                Ok(message) => ok_with_data!(req, message),
+                Err(e) => bad_request!(req, e),
+            }
         },
     )?;
 
@@ -100,18 +117,23 @@ fn version() -> &'static str {
     VERSION
 }
 
-fn echo_post(data: &str, system: ApiState) -> String {
+fn echo_post(data: &str, system: ApiState) {
     system.lock().unwrap().echo_data = data.to_string();
-    "done".to_string()
 }
 
-fn echo_get(system: ApiState) -> String {
-    system.lock().unwrap().echo_data.clone()
+fn echo_get(system: ApiState) -> Result<String> {
+    let data = system.lock().unwrap().echo_data.clone();
+    Ok(data)
 }
 
-fn put_drink(data: &str, system: ApiState) -> Result<String, String> {
-    let drink: Drink = serde_json::from_str(data).map_err(|e| e.to_string())?;
-    drink.validate().map_err(|e| e.to_string())?;
+fn put_drink(data: &str, system: ApiState) -> Result<()> {
+    let drink: Drink = serde_json::from_str(data)?;
+    drink.validate()?;
     system.lock().unwrap().drink = Some(drink);
-    success!()
+    Ok(())
+}
+
+fn post_drink(data: &str, system: ApiState) -> Result<()> {
+    system.lock().unwrap().echo_data = data.to_string();
+    Ok(())
 }

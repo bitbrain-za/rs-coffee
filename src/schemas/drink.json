@@ -2,7 +2,7 @@
     "name": "Cappuccino",
     "preinfusion": {
         "time": 3.0,
-        "pressure": 2.0
+        "pressure": 3.0
     },
     "shot": {
         "weight": 36.0,
@@ -25,5 +25,7 @@
             }
         ]
     },
-    "postinfusion": "HeatForSteam(140.0)"
+    "postinfusion": {
+        "HeatForSteam": 140.0
+    }
 }
