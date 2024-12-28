@@ -1,6 +1,6 @@
+use super::{handlers_device, handlers_drinks};
 use crate::app_state::ApiState;
-use crate::schemas::drink::Drink;
-use anyhow::Result;
+use anyhow::{Error, Result};
 use embedded_svc::{
     http::{Headers, Method},
     io::{Read, Write},
@@ -9,7 +9,6 @@ use esp_idf_svc::http::server::EspHttpServer;
 
 const STACK_SIZE: usize = 1024 * 10;
 const MAX_LEN: usize = 2048;
-const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 macro_rules! handle_request_data {
     ($req:expr) => {{
@@ -50,7 +49,7 @@ macro_rules! bad_request {
     }};
 }
 
-pub fn create_server(system: ApiState) -> anyhow::Result<EspHttpServer<'static>> {
+pub fn create_server(system: ApiState) -> Result<EspHttpServer<'static>> {
     let server_configuration = esp_idf_svc::http::server::Configuration {
         stack_size: STACK_SIZE,
         ..Default::default()
@@ -61,79 +60,46 @@ pub fn create_server(system: ApiState) -> anyhow::Result<EspHttpServer<'static>>
     Ok(server)
 }
 
-fn create_router(server: &mut EspHttpServer<'static>, system: ApiState) -> anyhow::Result<()> {
-    server.fn_handler::<anyhow::Error, _>("/api/v1/version", Method::Get, |req| {
-        let resp = version();
+fn create_router(server: &mut EspHttpServer<'static>, system: ApiState) -> Result<()> {
+    /* Device Endpoints */
+    server.fn_handler::<Error, _>("/api/v1/version", Method::Get, |req| {
+        let resp = handlers_device::version();
         ok_with_data!(req, resp)
     })?;
 
     let my_system = system.clone();
-    server.fn_handler::<anyhow::Error, _>(
-        "/api/v1/echo",
-        Method::Get,
-        move |req| match echo_get(my_system.clone()) {
+    server.fn_handler::<Error, _>("/api/v1/echo", Method::Get, move |req| {
+        match handlers_device::echo_get(my_system.clone()) {
             Ok(data) => ok_with_data!(req, data),
             Err(e) => bad_request!(req, e),
-        },
-    )?;
-
-    let my_system = system.clone();
-    server.fn_handler::<anyhow::Error, _>("/api/v1/echo", Method::Post, move |mut req| {
-        let data = handle_request_data!(req);
-        echo_post(&data, my_system.clone());
-        ok!(req)
+        }
     })?;
 
     let my_system = system.clone();
-    server.fn_handler::<anyhow::Error, _>(
-        "/api/v1/coffee/drink",
-        Method::Put,
-        move |mut req| {
-            let data = handle_request_data!(req);
-            match put_drink(&data, my_system.clone()) {
-                Ok(message) => ok_with_data!(req, message),
-                Err(e) => bad_request!(req, e),
-            }
-        },
-    )?;
+    server.fn_handler::<Error, _>("/api/v1/echo", Method::Post, move |mut req| {
+        let data = handle_request_data!(req);
+        handlers_device::echo_post(&data, my_system.clone());
+        ok!(req)
+    })?;
+
+    /* Drink Endpoints */
+    let my_system = system.clone();
+    server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Put, move |mut req| {
+        let data = handle_request_data!(req);
+        match handlers_drinks::put_drink(&data, my_system.clone()) {
+            Ok(message) => ok_with_data!(req, message),
+            Err(e) => bad_request!(req, e),
+        }
+    })?;
 
     let my_system = system.clone();
-    server.fn_handler::<anyhow::Error, _>(
-        "/api/v1/coffee/drink",
-        Method::Post,
-        move |mut req| {
-            let data = handle_request_data!(req);
-            match post_drink(&data, my_system.clone()) {
-                Ok(message) => ok_with_data!(req, message),
-                Err(e) => bad_request!(req, e),
-            }
-        },
-    )?;
+    server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Post, move |mut req| {
+        let data = handle_request_data!(req);
+        match handlers_drinks::post_drink(&data, my_system.clone()) {
+            Ok(message) => ok_with_data!(req, message),
+            Err(e) => bad_request!(req, e),
+        }
+    })?;
 
-    Ok(())
-}
-
-fn version() -> &'static str {
-    VERSION
-}
-
-fn echo_post(data: &str, system: ApiState) {
-    system.lock().unwrap().echo_data = data.to_string();
-}
-
-fn echo_get(system: ApiState) -> Result<String> {
-    let data = system.lock().unwrap().echo_data.clone();
-    Ok(data)
-}
-
-fn put_drink(data: &str, system: ApiState) -> Result<()> {
-    let drink: Drink = serde_json::from_str(data)?;
-    drink.validate()?;
-    system.lock().unwrap().drink = Some(drink);
-    Ok(())
-}
-
-fn post_drink(data: &str, system: ApiState) -> Result<()> {
-    system.lock().unwrap().echo_data = data.to_string();
     Ok(())
 }
