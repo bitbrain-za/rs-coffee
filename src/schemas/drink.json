@@ -1,0 +1,29 @@
+{
+    "name": "Cappuccino",
+    "preinfusion": {
+        "time": 3.0,
+        "pressure": 2.0
+    },
+    "shot": {
+        "weight": 36.0,
+        "time": null,
+        "profile": [
+            {
+                "degrees": 93.5,
+                "pressure": 9.0,
+                "percentage": 30
+            },
+            {
+                "degrees": 92.5,
+                "pressure": 8.5,
+                "percentage": 40
+            },
+            {
+                "degrees": 91.5,
+                "pressure": 7.5,
+                "percentage": 30
+            }
+        ]
+    },
+    "postinfusion": "HeatForSteam(140.0)"
+}

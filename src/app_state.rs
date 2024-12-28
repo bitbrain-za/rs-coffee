@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 pub type ApiState = Arc<Mutex<ApiData>>;
 pub struct ApiData {
     pub echo_data: String,
+    pub drink: Option<crate::schemas::drink::Drink>,
 }
 
 #[derive(Clone)]

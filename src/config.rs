@@ -29,3 +29,12 @@ pub const STEADY_STATE_TEST_TIME: Duration = Duration::from_secs(600);
 pub const TIME_DILATION_FACTOR: f32 = 0.01;
 
 pub const MPC_SMOOTHING_FACTOR: f32 = 0.5;
+
+pub struct Shots {}
+
+impl Shots {
+    pub const MAX_SHOT_TEMPERATURE: f32 = 105.0;
+    pub const MIN_SHOT_TEMPERATURE: f32 = 00.0;
+    pub const MAX_SHOT_PRESSURE_BAR: f32 = 12.0;
+    pub const MIN_SHOT_PRESSURE_BAR: f32 = 3.0;
+}

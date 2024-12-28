@@ -10,6 +10,7 @@ mod gpio;
 mod indicator;
 mod kv_store;
 mod models;
+mod schemas;
 mod sensors;
 mod state_machines;
 use crate::components::boiler::Message as BoilerMessage;
@@ -22,7 +23,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-const SIMULATE_AUTO_TUNE: bool = true;
+const SIMULATE_AUTO_TUNE: bool = false;
 #[cfg(feature = "simulate")]
 fn simulate_auto_tuner(system: System, mailbox: crate::components::boiler::Mailbox) {
     if SIMULATE_AUTO_TUNE {
@@ -77,6 +78,7 @@ fn main() -> Result<()> {
     }
     let api_state = app_state::ApiData {
         echo_data: "Init".to_string(),
+        drink: None,
     };
     let api_state = Arc::new(Mutex::new(api_state));
     let server = api::rest::create_server(api_state.clone())?;
