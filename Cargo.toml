@@ -52,6 +52,7 @@ serde_json = { version = "1", default-features = false, features = ["alloc"] }
 rand = { version = "0.8.4", optional = true }
 rand_distr = { version = "0.4.2", optional = true }
 embedded-svc = { version = "0.28", default-features = false }
+dotenv_codegen = "0.15.0"
 
 [build-dependencies]
 embuild = "0.32.0"

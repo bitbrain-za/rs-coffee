@@ -481,12 +481,15 @@ impl<'a> Board<'a> {
     }
 
     async fn connect_wifi(wifi: &mut AsyncWifi<EspWifi<'static>>) -> anyhow::Result<()> {
-        const SSID: &str = "Wokwi-GUEST";
-        const PASSWORD: &str = "";
+        use dotenv_codegen::dotenv;
         let wifi_configuration = Configuration::Client(ClientConfiguration {
-            ssid: SSID.try_into().unwrap(),
+            ssid: dotenv!("WIFI_SSID")
+                .try_into()
+                .expect("Failed to parse SSID"),
             auth_method: AuthMethod::None,
-            password: PASSWORD.try_into().unwrap(),
+            password: dotenv!("WIFI_PASSWORD")
+                .try_into()
+                .expect("Failed to parse password"),
             ..Default::default()
         });
 
