@@ -1,6 +1,7 @@
 // [ ] Go through all the "expects" and change them to put the system into an error/panic state
 // [ ] Remove this later, just silence warnings while we're doing large scale writing
 #![allow(dead_code)]
+mod api;
 mod app_state;
 mod board;
 mod components;
@@ -17,6 +18,7 @@ use app_state::System;
 use board::{Action, F32Read, Reading};
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -73,6 +75,12 @@ fn main() -> Result<()> {
         *board.outputs.solenoid.lock().unwrap() =
             gpio::relay::State::on(Some(Duration::from_secs(5)));
     }
+    let api_state = app_state::ApiData {
+        echo_data: "Init".to_string(),
+    };
+    let api_state = Arc::new(Mutex::new(api_state));
+    let server = api::rest::create_server(api_state.clone())?;
+    core::mem::forget(server);
 
     let mut boiler = components::boiler::Boiler::new(system.clone());
     boiler.start(element);

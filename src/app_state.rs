@@ -7,6 +7,11 @@ use crate::state_machines::{
 use std::default::Default;
 use std::sync::{Arc, Mutex};
 
+pub type ApiState = Arc<Mutex<ApiData>>;
+pub struct ApiData {
+    pub echo_data: String,
+}
+
 #[derive(Clone)]
 pub struct System {
     pub system_state: Arc<Mutex<SystemState>>,

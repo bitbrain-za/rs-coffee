@@ -15,12 +15,20 @@ use crate::state_machines::{
     operational_fsm::{OperationalState, Transitions},
     ArcMutexState,
 };
+use core::convert::TryInto;
+use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
 use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
 };
 use esp_idf_svc::hal::gpio::{Gpio12, Gpio15, Gpio6, Gpio7, InputPin, OutputPin};
+use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
+use esp_idf_svc::timer::EspTaskTimerService;
+use esp_idf_svc::{
+    eventloop::EspSystemEventLoop,
+    wifi::{AsyncWifi, EspWifi},
+};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -247,6 +255,26 @@ impl<'a> Board<'a> {
         operational_state
             .transition(Transitions::StartingUpStage("Input Setup".to_string()))
             .expect("Failed to set operational state");
+
+        log::info!("Setting up wifi");
+        let sys_loop = EspSystemEventLoop::take().expect("Unable to take sysloop");
+        let timer_service = EspTaskTimerService::new().expect("Failed to create timer service");
+
+        let mut wifi = AsyncWifi::wrap(
+            EspWifi::new(peripherals.modem, sys_loop.clone(), None).expect("Failed to create wifi"),
+            sys_loop,
+            timer_service,
+        )
+        .expect("Failed to create async wifi");
+        block_on(Self::connect_wifi(&mut wifi)).expect("Failed to connect wifi");
+        let ip_info = wifi
+            .wifi()
+            .sta_netif()
+            .get_ip_info()
+            .expect("Failed to get IP info");
+        log::info!("Wifi DHCP info: {:?}", ip_info);
+        core::mem::forget(wifi);
+
         log::info!("Setting up buttons");
         let mut button_brew = Button::new(peripherals.pins.gpio6, None);
         let mut button_steam = Button::new(peripherals.pins.gpio15, None);
@@ -450,6 +478,30 @@ impl<'a> Board<'a> {
     }
     pub fn close_valve(&self, duration: Option<Duration>) {
         *self.outputs.solenoid.lock().unwrap() = RelayState::off(duration);
+    }
+
+    async fn connect_wifi(wifi: &mut AsyncWifi<EspWifi<'static>>) -> anyhow::Result<()> {
+        const SSID: &str = "Wokwi-GUEST";
+        const PASSWORD: &str = "";
+        let wifi_configuration = Configuration::Client(ClientConfiguration {
+            ssid: SSID.try_into().unwrap(),
+            auth_method: AuthMethod::None,
+            password: PASSWORD.try_into().unwrap(),
+            ..Default::default()
+        });
+
+        wifi.set_configuration(&wifi_configuration)?;
+
+        wifi.start().await?;
+        log::info!("Wifi started");
+
+        wifi.connect().await?;
+        log::info!("Wifi connected");
+
+        wifi.wait_netif_up().await?;
+        log::info!("Wifi netif up");
+
+        Ok(())
     }
 }
 

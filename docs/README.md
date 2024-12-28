@@ -1,5 +1,20 @@
 # rs_coffee
 
+# The Goal
+
+This project is designed with the Rancilio Silvia V6 in mind.
+It aims to provide stable temperature control using MPC. By combinming a scale on the output, we can also estimate the flow rate and further improve the accuracy of predictions.
+
+
+
+## References
+
+ - [The Rust on ESP Book](https://docs.esp-rs.org/book/)
+ - [Marlin MPC](https://marlinfw.org/docs/features/model_predictive_control.html)
+
+
+# Bits from the Template
+
 ## Dev Containers
 This repository offers Dev Containers supports for:
 -  [VS Code Dev Containers](https://code.visualstudio.com/docs/remote/containers#_quick-start-open-an-existing-folder-in-a-container)
