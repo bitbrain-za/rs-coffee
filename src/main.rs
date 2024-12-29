@@ -89,7 +89,7 @@ fn main() -> Result<()> {
     let mqtt_port: u16 = dotenv!("MQTT_PORT").parse().expect("Invalid MQTT Port");
     let mqtt_url = format!("mqtt://{}:{}", mqtt_url, mqtt_port);
     let mqtt_client_id = dotenv!("MQTT_CLIENT_ID");
-    api::mqtt::mqtt_create(&mqtt_url, mqtt_client_id);
+    api::mqtt::mqtt_create(&mqtt_url, mqtt_client_id, &system);
 
     let mut boiler = components::boiler::Boiler::new(system.clone());
     boiler.start(element);

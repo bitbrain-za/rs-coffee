@@ -38,3 +38,9 @@ impl Shots {
     pub const MAX_SHOT_PRESSURE_BAR: f32 = 12.0;
     pub const MIN_SHOT_PRESSURE_BAR: f32 = 3.0;
 }
+
+pub struct Mqtt {}
+impl Mqtt {
+    pub const STATUS_TOPIC: &'static str = "dummy/status";
+    pub const EVENT_TOPIC: &'static str = "dummy/command";
+}

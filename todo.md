@@ -1,1 +1,8 @@
  - [ ] Review timer implementation (https://docs.esp-rs.org/esp-idf-svc/esp_idf_svc/timer/index.html)
+ - [ ] Tidy up the state stuff
+ - [ ] Tidy up the board stuff
+ - [ ] Add periodic status reporting
+ - [ ] Add Availability
+ - [ ] Runtime WIFI config
+ - [ ] OTA
+ - [ ] consolidate the types
