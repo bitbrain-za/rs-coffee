@@ -16,6 +16,7 @@ env:
   MQTT_PORT: 1883
   MQTT_USER: "dummy"
   MQTT_PASSWORD: "dummy"
+  MQTT_CLIENT_ID: "rs-coffee"
 
 jobs:
   rust-checks:
