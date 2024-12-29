@@ -29,7 +29,7 @@ use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     wifi::{AsyncWifi, EspWifi},
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
@@ -103,36 +103,6 @@ impl Scale {
 }
 
 #[derive(Default)]
-pub struct Temperature {
-    #[cfg(not(feature = "simulate"))]
-    degrees: Arc<Mutex<f32>>,
-    #[cfg(feature = "simulate")]
-    pub degrees: Arc<Mutex<f32>>,
-}
-
-impl Temperature {
-    pub fn get_temperature(&self) -> f32 {
-        *self.degrees.lock().unwrap()
-    }
-    #[cfg(feature = "simulate")]
-    pub fn set_temperature(&self, degrees: f32) {
-        *self.degrees.lock().unwrap() = degrees;
-    }
-    #[cfg(not(feature = "simulate"))]
-    pub fn set_temperature(
-        &self,
-        voltage: f32,
-        probe: impl crate::sensors::traits::TemperatureProbe,
-    ) {
-        {
-            *self.degrees.lock().unwrap() = probe
-                .convert_voltage_to_degrees(voltage)
-                .expect("Failed to convert voltage to degrees");
-        }
-    }
-}
-
-#[derive(Default)]
 pub struct Pressure {
     pressure: f32,
 }
@@ -155,7 +125,6 @@ impl Pressure {
 pub struct Sensors<'a> {
     pub buttons: Buttons<'a, Gpio6, Gpio15, Gpio7>,
     pub scale: Scale,
-    pub temperature: Arc<Mutex<Temperature>>,
     pub pressure: Arc<Mutex<Pressure>>,
     handle: thread::JoinHandle<()>,
     kill_switch: Arc<Mutex<bool>>,
@@ -184,6 +153,7 @@ pub struct Board<'a> {
     pub sensors: Sensors<'a>,
     pub outputs: Outputs,
     indicator: Ring,
+    pub temperature: Arc<RwLock<f32>>,
 }
 
 impl<'a> Board<'a> {
@@ -244,7 +214,7 @@ impl<'a> Board<'a> {
 
         log::info!("Setting up ADCs");
         let pressure = Arc::new(Mutex::new(Pressure::default()));
-        let temperature = Arc::new(Mutex::new(Temperature::default()));
+        let temperature = Arc::new(RwLock::new(f32::default()));
         let pressure_clone = pressure.clone();
         #[cfg(not(feature = "simulate"))]
         let temperature_clone = temperature.clone();
@@ -323,10 +293,14 @@ impl<'a> Board<'a> {
 
                     #[cfg(not(feature = "simulate"))]
                     if let Some((temperature, pressure)) = adc.read() {
-                        temperature_clone
-                            .lock()
-                            .unwrap()
-                            .set_temperature(temperature, pt100);
+                        let degrees = match pt100.convert_voltage_to_degrees(temperature) {
+                            Ok(degrees) => degrees,
+                            Err(e) => {
+                                log::error!("Failed to convert voltage to degrees: {:?}", e);
+                                continue;
+                            }
+                        };
+                        *temperature_clone.write().unwrap() = degrees;
                         pressure_clone
                             .lock()
                             .unwrap()
@@ -404,6 +378,7 @@ impl<'a> Board<'a> {
         (
             Board {
                 indicator: ring,
+                temperature,
                 sensors: Sensors {
                     buttons: Buttons {
                         brew_button: button_brew,
@@ -413,7 +388,6 @@ impl<'a> Board<'a> {
                     scale: Scale { weight },
                     handle: sensor_handle,
                     kill_switch: sensor_killswitch,
-                    temperature,
                     pressure,
                 },
                 outputs: Outputs {
@@ -511,9 +485,10 @@ impl Reading {
     pub fn get(&self, board: Arc<Mutex<Board>>) -> Self {
         let mut board = board.lock().unwrap();
         match self {
-            Reading::BoilerTemperature(_) => Reading::BoilerTemperature(Some(
-                board.sensors.temperature.lock().unwrap().get_temperature(),
-            )),
+            Reading::BoilerTemperature(_) => {
+                let temperature = *board.temperature.read().unwrap();
+                Reading::BoilerTemperature(Some(temperature))
+            }
             Reading::PumpPressure(_) => {
                 Reading::PumpPressure(Some(board.sensors.pressure.lock().unwrap().get_pressure()))
             }
@@ -545,9 +520,7 @@ impl F32Read {
     pub fn get(&self, board: Arc<Mutex<Board>>) -> f32 {
         let board = board.lock().unwrap();
         match self {
-            F32Read::BoilerTemperature => {
-                board.sensors.temperature.lock().unwrap().get_temperature()
-            }
+            F32Read::BoilerTemperature => *board.temperature.read().unwrap(),
             F32Read::PumpPressure => board.sensors.pressure.lock().unwrap().get_pressure(),
             F32Read::ScaleWeight => board.sensors.scale.get_weight(),
             F32Read::PumpDutyCycle => *board.outputs.pump_duty_cycle.lock().unwrap(),

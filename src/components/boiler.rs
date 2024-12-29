@@ -1,10 +1,11 @@
-use crate::app_state::System;
 use crate::board::Element;
-use crate::board::F32Read::BoilerTemperature;
 use crate::config;
 use crate::models::boiler::{BoilerModel, BoilerModelParameters};
 use esp_idf_svc::hal::delay::FreeRtos;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::{
+    mpsc::{channel, Sender},
+    Arc, RwLock,
+};
 use std::time::{Duration, Instant};
 
 const UPDATE_INTERVAL: u64 = 1000;
@@ -88,10 +89,9 @@ impl Boiler {
         self.mailbox.send(message).unwrap();
     }
 
-    pub fn new(element: Element, system: System) -> Self {
+    pub fn new(element: Element, temperature_probe: Arc<RwLock<f32>>) -> Self {
         let model = BoilerModel::new(Some(config::STAND_IN_AMBIENT));
         let (mailbox, rx) = channel::<Message>();
-        let my_system = system.clone();
         let mut element = element;
         #[cfg(feature = "simulate")]
         let boiler_simulator = crate::models::boiler::BoilerModel::new(Some(25.0));
@@ -128,7 +128,7 @@ impl Boiler {
                             next_iteration += Duration::from_secs_f32(
                                 UPDATE_INTERVAL as f32 * config::TIME_DILATION_FACTOR / 1000.0,
                             );
-                            let probe_temperature = my_system.read_f32(BoilerTemperature);
+                            let probe_temperature = *temperature_probe.read().unwrap();
                             if probe_temperature >= upper_threshold {
                                 0.0
                             } else if probe_temperature <= lower_threshold {
@@ -141,7 +141,7 @@ impl Boiler {
                             if next_iteration > Instant::now() {
                                 continue;
                             }
-                            let probe_temperature = my_system.read_f32(BoilerTemperature);
+                            let probe_temperature = *temperature_probe.read().unwrap();
                             let power = my_boiler_model.control(
                                 probe_temperature,
                                 config::STAND_IN_AMBIENT,
@@ -163,19 +163,7 @@ impl Boiler {
                             duty_cycle * boiler_simulator.max_power,
                             Duration::from_millis(UPDATE_INTERVAL),
                         );
-
-                        {
-                            my_system
-                                .board
-                                .clone()
-                                .lock()
-                                .unwrap()
-                                .sensors
-                                .temperature
-                                .lock()
-                                .unwrap()
-                                .set_temperature(probe);
-                        }
+                        *temperature_probe.write().unwrap() = probe;
                     }
                     {
                         element.set_duty_cycle(duty_cycle);

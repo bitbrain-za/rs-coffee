@@ -90,7 +90,8 @@ fn main() -> Result<()> {
     let mqtt_client_id = dotenv!("MQTT_CLIENT_ID");
     api::mqtt::mqtt_create(&mqtt_url, mqtt_client_id, &system);
 
-    let boiler = components::boiler::Boiler::new(element, system.clone());
+    let temperature_probe = system.board.lock().unwrap().temperature.clone();
+    let boiler = components::boiler::Boiler::new(element, temperature_probe);
 
     simulate_auto_tuner(system.clone(), boiler.clone());
 
