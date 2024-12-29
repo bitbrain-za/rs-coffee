@@ -17,6 +17,7 @@ use crate::components::boiler::Message as BoilerMessage;
 use anyhow::Result;
 use app_state::System;
 use board::{Action, F32Read, Reading};
+use dotenv_codegen::dotenv;
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
 use std::sync::{Arc, Mutex};
@@ -83,6 +84,12 @@ fn main() -> Result<()> {
     let api_state = Arc::new(Mutex::new(api_state));
     let server = api::rest::create_server(api_state.clone())?;
     core::mem::forget(server);
+
+    let mqtt_url: String = dotenv!("MQTT_SERVER").try_into().expect("Invalid MQTT URL");
+    let mqtt_port: u16 = dotenv!("MQTT_PORT").parse().expect("Invalid MQTT Port");
+    let mqtt_url = format!("mqtt://{}:{}", mqtt_url, mqtt_port);
+    let mqtt_client_id = dotenv!("MQTT_CLIENT_ID");
+    api::mqtt::mqtt_create(&mqtt_url, mqtt_client_id);
 
     let mut boiler = components::boiler::Boiler::new(system.clone());
     boiler.start(element);
