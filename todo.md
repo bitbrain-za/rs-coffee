@@ -6,3 +6,10 @@
  - [ ] Runtime WIFI config
  - [ ] OTA
  - [ ] consolidate the types
+ - [ ] Fix up all the state machines/system state/operation state
+ - [ ] Maybe an observer patter?
+ - [X] Try out mspc channels again
+ - [ ] Move ADC to I2C ADC
+ - [ ] Implement Level Sensing
+ - [ ] SD Card - Wait for next release: https://github.com/esp-rs/esp-idf-svc/issues/467
+ - [ ] Display

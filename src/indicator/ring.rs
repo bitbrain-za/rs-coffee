@@ -1,11 +1,11 @@
-use std::time::Duration;
-
 use esp_idf_hal::{gpio::OutputPin, peripheral::Peripheral, rmt::RmtChannel};
 use smart_led_effects::{
     strip::{self, EffectIterator},
     Srgb,
 };
 use smart_leds_trait::SmartLedsWrite;
+use std::sync::mpsc::{channel, Sender};
+use std::time::Duration;
 use ws2812_esp32_rmt_driver::{Ws2812Esp32Rmt, RGB8 as Rgb};
 
 #[derive(Debug, PartialEq, Clone, Copy, std::default::Default)]
@@ -29,58 +29,21 @@ pub enum State {
     Error,
 }
 
-pub struct Ring<'d> {
-    pub state: State,
-    led: Ws2812Esp32Rmt<'d>,
-    effect: Box<dyn EffectIterator>,
-    count: usize,
-    pub tickspeed: std::time::Duration,
-    last_tick: std::time::Instant,
-}
-
-impl<'d> Ring<'d> {
-    pub fn new<C: RmtChannel>(
-        channel: impl Peripheral<P = C> + 'd,
-        pin: impl Peripheral<P = impl OutputPin> + 'd,
-        count: usize,
-        tickspeed: std::time::Duration,
-    ) -> Self {
-        let led = Ws2812Esp32Rmt::new(channel, pin).expect("Failed to initialize LED ring");
-        Self {
-            state: State::Off,
-            led,
-            effect: Box::new(strip::Rainbow::new(count, None)),
-            count,
-            tickspeed,
-            last_tick: std::time::Instant::now() - tickspeed,
-        }
-    }
-
-    pub fn set_state(&mut self, state: State) {
-        match state {
-            State::Panic => {
-                self.effect = Box::new(strip::Strobe::new(
-                    self.count,
-                    Some(Srgb::new(255, 0, 0)),
-                    Duration::from_millis(100),
-                    None,
-                ));
-            }
-            State::Error => {
-                self.effect = Box::new(strip::Cylon::new(
-                    self.count,
-                    Srgb::new(255, 0, 0),
-                    None,
-                    None,
-                ));
-            }
-            State::Busy => {
-                self.effect = Box::new(strip::RunningLights::new(self.count, None, false));
-            }
-            State::Idle => self.effect = Box::new(strip::Breathe::new(self.count, None, None)),
+impl State {
+    pub fn as_effect(&self, count: usize) -> Box<dyn EffectIterator> {
+        match self {
+            State::Panic => Box::new(strip::Strobe::new(
+                count,
+                Some(Srgb::new(255, 0, 0)),
+                Duration::from_millis(100),
+                None,
+            )),
+            State::Error => Box::new(strip::Cylon::new(count, Srgb::new(255, 0, 0), None, None)),
+            State::Busy => Box::new(strip::RunningLights::new(count, None, false)),
+            State::Idle => Box::new(strip::Breathe::new(count, None, None)),
             State::Guage { min, max, level } => {
                 let mut progress = strip::ProgressBar::new(
-                    self.count,
+                    count,
                     Some(Srgb::new(0.0, 1.0, 0.0)),
                     Some(Srgb::new(1.0, 0.0, 0.0)),
                     Some(false),
@@ -89,11 +52,11 @@ impl<'d> Ring<'d> {
                 let percentage: f32 = level / (max - min) * 100.0;
                 progress.set_percentage(percentage);
 
-                self.effect = Box::new(progress);
+                Box::new(progress)
             }
             State::Temperature { min, max, level } => {
                 let mut progress = strip::ProgressBar::new(
-                    self.count,
+                    count,
                     Some(Srgb::new(0.0, 0.0, 1.0)),
                     Some(Srgb::new(1.0, 0.0, 0.0)),
                     Some(true),
@@ -102,34 +65,63 @@ impl<'d> Ring<'d> {
                 let percentage: f32 = level / (max - min) * 100.0;
                 progress.set_percentage(percentage);
 
-                self.effect = Box::new(progress);
+                Box::new(progress)
             }
-            State::Off => {
-                self.effect = Box::new(strip::Breathe::new(self.count, None, None));
-            }
+            State::Off => Box::new(strip::Breathe::new(count, None, None)),
         }
-        self.state = state;
+    }
+}
+
+#[derive(Clone)]
+pub struct Ring {
+    mailbox: Sender<State>,
+}
+
+impl Ring {
+    pub fn set_state(&self, state: State) {
+        self.mailbox.send(state).unwrap();
     }
 
-    pub fn tick(&mut self) -> std::time::Duration {
-        let elapsed = self.last_tick.elapsed();
-        if elapsed < self.tickspeed {
-            return self.tickspeed - elapsed;
-        }
-        self.last_tick = std::time::Instant::now();
-        let pixels: Vec<Rgb> = self
-            .effect
-            .next()
-            .unwrap()
-            .iter()
-            .map(|i| Rgb {
-                r: i.red,
-                g: i.green,
-                b: i.blue,
+    pub fn new<C: RmtChannel>(
+        rmt_channel: impl Peripheral<P = C> + 'static,
+        pin: impl Peripheral<P = impl OutputPin> + 'static,
+        tickspeed: std::time::Duration,
+        count: usize,
+    ) -> Self {
+        let mut led = Ws2812Esp32Rmt::new(rmt_channel, pin).expect("Failed to initialize LED ring");
+        let (tx, rx) = channel::<State>();
+
+        std::thread::Builder::new()
+            .name("indicator".to_string())
+            .spawn(move || {
+                let mut active_state = State::Off;
+                let mut effect: Box<dyn EffectIterator> =
+                    Box::new(strip::Rainbow::new(count, None));
+                log::info!("Starting indicator thread");
+                loop {
+                    while let Ok(state) = rx.try_recv() {
+                        if state != active_state {
+                            effect = state.as_effect(count);
+                            active_state = state;
+                        }
+                    }
+
+                    let pixels: Vec<Rgb> = effect
+                        .next()
+                        .unwrap()
+                        .iter()
+                        .map(|i| Rgb {
+                            r: i.red,
+                            g: i.green,
+                            b: i.blue,
+                        })
+                        .collect();
+                    led.write(pixels).unwrap();
+                    std::thread::sleep(tickspeed);
+                }
             })
-            .collect();
-        self.led.write(pixels).unwrap();
-        let elapsed = self.last_tick.elapsed();
-        self.tickspeed - elapsed
+            .expect("Failed to spawn indicator thread");
+
+        Ring { mailbox: tx }
     }
 }

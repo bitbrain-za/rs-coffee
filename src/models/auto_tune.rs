@@ -146,7 +146,7 @@ pub struct HeuristicAutoTuner {
     modeled_temperature: Temperature,
     percentage_complete: f32,
     system: System,
-    pub boiler_mailbox: Option<crate::components::boiler::Mailbox>,
+    pub boiler: Option<crate::components::boiler::Boiler>,
 }
 
 pub struct AmbientTest {
@@ -697,7 +697,7 @@ impl HeuristicAutoTuner {
             modeled_temperature: 0.0,
             percentage_complete: 0.0,
             system,
-            boiler_mailbox: None,
+            boiler: None,
         }
     }
 
@@ -727,12 +727,9 @@ impl HeuristicAutoTuner {
         {
             return;
         }
-        if let Some(mailbox) = &self.boiler_mailbox {
+        if let Some(boiler) = &self.boiler {
             self.element_power = ElementControlOption::Some(power);
-            mailbox
-                .lock()
-                .unwrap()
-                .push(ElementMessage::SetMode(ElementMode::Transparent { power }));
+            boiler.send_message(ElementMessage::SetMode(ElementMode::Transparent { power }));
         }
     }
 
@@ -741,19 +738,19 @@ impl HeuristicAutoTuner {
         self.element_power = ElementControlOption::Locked;
         let current_temperature = self.get_probe();
 
-        if let Some(mailbox) = &self.boiler_mailbox {
+        if let Some(boiler) = &self.boiler {
             let message = ElementMessage::UpdateParameters {
                 parameters: mpc,
                 initial_probe_temperature: current_temperature,
                 initial_ambient_temperature: ambient_temperature,
                 initial_boiler_temperature: self.modeled_temperature,
             };
-            mailbox.lock().unwrap().push(message);
+            boiler.send_message(message);
 
             let message = ElementMessage::SetMode(ElementMode::Mpc {
                 target: self.modeled_temperature,
             });
-            mailbox.lock().unwrap().push(message);
+            boiler.send_message(message);
         }
     }
 

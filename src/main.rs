@@ -26,12 +26,12 @@ use std::time::Duration;
 
 const SIMULATE_AUTO_TUNE: bool = false;
 #[cfg(feature = "simulate")]
-fn simulate_auto_tuner(system: System, mailbox: crate::components::boiler::Mailbox) {
+fn simulate_auto_tuner(system: System, boiler: crate::components::boiler::Boiler) {
     if SIMULATE_AUTO_TUNE {
         log::info!("Running simulation");
         let mut auto_tuner =
             models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000), system.clone());
-        auto_tuner.boiler_mailbox = Some(mailbox.clone());
+        auto_tuner.boiler = Some(boiler.clone());
         match auto_tuner.auto_tune_blocking() {
             Ok(res) => {
                 let probe_temperature = system.read_f32(board::F32Read::BoilerTemperature);
@@ -41,11 +41,11 @@ fn simulate_auto_tuner(system: System, mailbox: crate::components::boiler::Mailb
                     initial_ambient_temperature: config::STAND_IN_AMBIENT,
                     initial_boiler_temperature: auto_tuner.get_model_boiler_temperature(),
                 };
-                mailbox.lock().unwrap().push(message);
+                boiler.send_message(message);
                 let message = components::boiler::Message::SetMode(components::boiler::Mode::Mpc {
                     target: 94.0,
                 });
-                mailbox.lock().unwrap().push(message);
+                boiler.send_message(message);
             }
             Err(e) => log::error!("{:?}", e),
         }
@@ -72,7 +72,6 @@ fn main() -> Result<()> {
     let (system, element) = System::new();
     {
         let board = system.board.lock().unwrap();
-        *board.outputs.boiler_duty_cycle.lock().unwrap() = 0.5;
         *board.outputs.pump_duty_cycle.lock().unwrap() = 0.2;
         *board.outputs.solenoid.lock().unwrap() =
             gpio::relay::State::on(Some(Duration::from_secs(5)));
@@ -91,10 +90,9 @@ fn main() -> Result<()> {
     let mqtt_client_id = dotenv!("MQTT_CLIENT_ID");
     api::mqtt::mqtt_create(&mqtt_url, mqtt_client_id, &system);
 
-    let mut boiler = components::boiler::Boiler::new(system.clone());
-    boiler.start(element);
+    let boiler = components::boiler::Boiler::new(element, system.clone());
 
-    simulate_auto_tuner(system.clone(), boiler.get_mailbox());
+    simulate_auto_tuner(system.clone(), boiler.clone());
 
     let mut loop_interval = Duration::from_millis(1000);
     let mut auto_tuner =
@@ -144,11 +142,7 @@ fn main() -> Result<()> {
                     OperationalState::AutoTuneInit => {
                         log::info!("Auto-tuning boiler");
 
-                        boiler
-                            .get_mailbox()
-                            .lock()
-                            .unwrap()
-                            .push(BoilerMessage::SetMode(components::boiler::Mode::Off));
+                        boiler.send_message(BoilerMessage::SetMode(components::boiler::Mode::Off));
 
                         system
                             .operational_state
@@ -184,7 +178,7 @@ fn main() -> Result<()> {
                                     initial_boiler_temperature: initial_boiler,
                                 };
 
-                                boiler.get_mailbox().lock().unwrap().push(message);
+                                boiler.send_message(message);
 
                                 system
                                     .operational_state
@@ -222,29 +216,17 @@ fn main() -> Result<()> {
                             .execute_board_action(Action::OpenValve(Some(Duration::from_secs(5))));
 
                         let mode = components::boiler::Mode::Mpc { target: 94.0 };
-                        boiler
-                            .get_mailbox()
-                            .lock()
-                            .unwrap()
-                            .push(BoilerMessage::SetMode(mode));
+                        boiler.send_message(BoilerMessage::SetMode(mode));
                     }
                     if button == board::ButtonEnum::HotWater {
                         let mode = components::boiler::Mode::BangBang {
                             upper_threshold: 95.0,
                             lower_threshold: 85.0,
                         };
-                        boiler
-                            .get_mailbox()
-                            .lock()
-                            .unwrap()
-                            .push(BoilerMessage::SetMode(mode));
+                        boiler.send_message(BoilerMessage::SetMode(mode));
                     }
                     if button == board::ButtonEnum::Steam {
-                        boiler
-                            .get_mailbox()
-                            .lock()
-                            .unwrap()
-                            .push(BoilerMessage::SetMode(components::boiler::Mode::Off));
+                        boiler.send_message(BoilerMessage::SetMode(components::boiler::Mode::Off));
                     }
                 }
             }

@@ -13,8 +13,8 @@
         {
             "type": "wokwi-led",
             "id": "led1",
-            "top": 140.4,
-            "left": -226.6,
+            "top": -147.6,
+            "left": 138.2,
             "attrs": {
                 "color": "green"
             }
@@ -22,8 +22,8 @@
         {
             "type": "wokwi-led",
             "id": "led2",
-            "top": 140.4,
-            "left": -169,
+            "top": -147.6,
+            "left": 195.8,
             "attrs": {
                 "color": "red"
             }
@@ -31,8 +31,8 @@
         {
             "type": "wokwi-led",
             "id": "led3",
-            "top": 140.4,
-            "left": -197.8,
+            "top": -147.6,
+            "left": 167,
             "attrs": {
                 "color": "blue"
             }
@@ -62,31 +62,10 @@
             }
         },
         {
-            "type": "wokwi-hc-sr04",
-            "id": "ultrasonic1",
-            "top": -152.1,
-            "left": 43.9,
-            "attrs": {}
-        },
-        {
             "type": "wokwi-gnd",
             "id": "gnd2",
             "top": 96,
             "left": 335.4,
-            "attrs": {}
-        },
-        {
-            "type": "wokwi-gnd",
-            "id": "gnd3",
-            "top": -48,
-            "left": 172.2,
-            "attrs": {}
-        },
-        {
-            "type": "wokwi-vcc",
-            "id": "vcc3",
-            "top": -124.04,
-            "left": 9.6,
             "attrs": {}
         },
         {
@@ -99,15 +78,15 @@
         {
             "type": "wokwi-gnd",
             "id": "gnd6",
-            "top": 230.4,
-            "left": 220.2,
+            "top": 240,
+            "left": 354.6,
             "attrs": {}
         },
         {
             "type": "wokwi-vcc",
             "id": "vcc5",
-            "top": 221.56,
-            "left": 201.6,
+            "top": 192.76,
+            "left": 355.2,
             "attrs": {}
         },
         {
@@ -120,8 +99,8 @@
         {
             "type": "wokwi-gnd",
             "id": "gnd7",
-            "top": 259.2,
-            "left": -250.2,
+            "top": -86.4,
+            "left": 114.6,
             "attrs": {}
         },
         {
@@ -188,12 +167,34 @@
         {
             "type": "wokwi-led-ring",
             "id": "ring1",
-            "top": 158.76,
-            "left": 255.31,
-            "rotate": 90,
+            "top": 288.21,
+            "left": 212.14,
+            "rotate": 180,
             "attrs": {
                 "pixels": "32"
             }
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd3",
+            "top": 288,
+            "left": -192.6,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc3",
+            "top": 221.56,
+            "left": -192,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-microsd-card",
+            "id": "sd1",
+            "top": 314.03,
+            "left": -136.67,
+            "rotate": 270,
+            "attrs": {}
         }
     ],
     "connections": [
@@ -210,30 +211,6 @@
             []
         ],
         [
-            "led1:A",
-            "esp:14",
-            "green",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "led3:A",
-            "esp:13",
-            "green",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "led2:A",
-            "esp:12",
-            "green",
-            [
-                "v0"
-            ]
-        ],
-        [
             "esp:GND.4",
             "gnd1:GND",
             "black",
@@ -245,23 +222,6 @@
             "esp:3V3.1",
             "vcc1:VCC",
             "red",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "ultrasonic1:VCC",
-            "vcc3:VCC",
-            "red",
-            [
-                "v28.8",
-                "h-19.2"
-            ]
-        ],
-        [
-            "ultrasonic1:GND",
-            "gnd3:GND",
-            "black",
             [
                 "v0"
             ]
@@ -318,22 +278,6 @@
         [
             "esp:36",
             "cell1:DT",
-            "green",
-            [
-                "h0"
-            ]
-        ],
-        [
-            "ultrasonic1:ECHO",
-            "esp:17",
-            "green",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "esp:16",
-            "ultrasonic1:TRIG",
             "green",
             [
                 "h0"
@@ -445,7 +389,8 @@
             "ring1:VCC",
             "red",
             [
-                "v0"
+                "h-28.8",
+                "v67.2"
             ]
         ],
         [
@@ -453,8 +398,8 @@
             "esp:21",
             "green",
             [
-                "h-57.6",
-                "v-76.8"
+                "v-96",
+                "h-230.4"
             ]
         ],
         [
@@ -464,6 +409,78 @@
             [
                 "v124.8",
                 "h38.4"
+            ]
+        ],
+        [
+            "led1:A",
+            "esp:1",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "led3:A",
+            "esp:2",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "led2:A",
+            "esp:42",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "sd1:GND",
+            "gnd3:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "sd1:VCC",
+            "vcc3:VCC",
+            "red",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "sd1:CS",
+            "esp:10",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "sd1:SCK",
+            "esp:12",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "sd1:DI",
+            "esp:13",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "esp:11",
+            "sd1:DO",
+            "green",
+            [
+                "h0"
             ]
         ]
     ],

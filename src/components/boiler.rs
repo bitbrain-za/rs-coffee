@@ -4,11 +4,8 @@ use crate::board::F32Read::BoilerTemperature;
 use crate::config;
 use crate::models::boiler::{BoilerModel, BoilerModelParameters};
 use esp_idf_svc::hal::delay::FreeRtos;
+use std::sync::mpsc::{channel, Sender};
 use std::time::{Duration, Instant};
-use std::{
-    sync::{Arc, Mutex},
-    thread,
-};
 
 const UPDATE_INTERVAL: u64 = 1000;
 
@@ -75,37 +72,32 @@ impl Message {
     }
 }
 
-pub type Mailbox = Arc<Mutex<Vec<Message>>>;
+pub type Mailbox = Sender<Message>;
+
+#[derive(Clone)]
 pub struct Boiler {
     mailbox: Mailbox,
-    pub system: System,
-    handle: Option<thread::JoinHandle<()>>,
 }
 
 impl Boiler {
-    pub fn new(system: System) -> Self {
-        Self {
-            system,
-            handle: None,
-            mailbox: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
     pub fn get_mailbox(&self) -> Mailbox {
         self.mailbox.clone()
     }
 
-    pub fn start(&mut self, element: Element) {
+    pub fn send_message(&self, message: Message) {
+        self.mailbox.send(message).unwrap();
+    }
+
+    pub fn new(element: Element, system: System) -> Self {
         let model = BoilerModel::new(Some(config::STAND_IN_AMBIENT));
-        let my_mailbox = self.mailbox.clone();
-        let system = self.system.clone();
+        let (mailbox, rx) = channel::<Message>();
+        let my_system = system.clone();
         let mut element = element;
         #[cfg(feature = "simulate")]
         let boiler_simulator = crate::models::boiler::BoilerModel::new(Some(25.0));
-
         let mut next_iteration = Instant::now() + Duration::from_millis(UPDATE_INTERVAL);
 
-        let handle = std::thread::Builder::new()
+        std::thread::Builder::new()
             .name("Boiler".to_string())
             .spawn(move || {
                 let mut my_mode = Mode::Off;
@@ -119,14 +111,7 @@ impl Boiler {
                 }
 
                 loop {
-                    /* Check for messages */
-                    let messages = my_mailbox
-                        .lock()
-                        .unwrap()
-                        .drain(..)
-                        .collect::<Vec<Message>>();
-
-                    for message in messages {
+                    while let Ok(message) = rx.try_recv() {
                         message.handle(&mut my_boiler_model, &mut my_mode);
                     }
 
@@ -143,7 +128,7 @@ impl Boiler {
                             next_iteration += Duration::from_secs_f32(
                                 UPDATE_INTERVAL as f32 * config::TIME_DILATION_FACTOR / 1000.0,
                             );
-                            let probe_temperature = system.read_f32(BoilerTemperature);
+                            let probe_temperature = my_system.read_f32(BoilerTemperature);
                             if probe_temperature >= upper_threshold {
                                 0.0
                             } else if probe_temperature <= lower_threshold {
@@ -156,7 +141,7 @@ impl Boiler {
                             if next_iteration > Instant::now() {
                                 continue;
                             }
-                            let probe_temperature = system.read_f32(BoilerTemperature);
+                            let probe_temperature = my_system.read_f32(BoilerTemperature);
                             let power = my_boiler_model.control(
                                 probe_temperature,
                                 config::STAND_IN_AMBIENT,
@@ -180,7 +165,7 @@ impl Boiler {
                         );
 
                         {
-                            system
+                            my_system
                                 .board
                                 .clone()
                                 .lock()
@@ -201,6 +186,6 @@ impl Boiler {
             })
             .expect("Failed to spawn output thread");
 
-        self.handle = Some(handle);
+        Self { mailbox }
     }
 }

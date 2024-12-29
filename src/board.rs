@@ -21,7 +21,7 @@ use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
 };
-use esp_idf_svc::hal::gpio::{Gpio12, Gpio15, Gpio6, Gpio7, InputPin, OutputPin};
+use esp_idf_svc::hal::gpio::{Gpio1, Gpio15, Gpio6, Gpio7, InputPin, OutputPin};
 use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
 use esp_idf_svc::timer::EspTaskTimerService;
@@ -33,7 +33,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-pub type Element = Pwm<'static, Gpio12>;
+pub type Element = Pwm<'static, Gpio1>;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ButtonEnum {
@@ -86,22 +86,6 @@ where
             buttons.push(ButtonEnum::HotWater);
         }
         buttons
-    }
-}
-
-pub struct Indicators {
-    state: Arc<Mutex<IndicatorState>>,
-    handle: thread::JoinHandle<()>,
-    kill_switch: Arc<Mutex<bool>>,
-}
-
-impl Indicators {
-    pub fn set_state(&self, state: IndicatorState) {
-        *self.state.lock().unwrap() = state;
-    }
-
-    pub fn kill(&self) {
-        *self.kill_switch.lock().unwrap() = true;
     }
 }
 
@@ -184,7 +168,6 @@ impl Sensors<'_> {
 }
 
 pub struct Outputs {
-    pub boiler_duty_cycle: Arc<Mutex<f32>>,
     pub pump_duty_cycle: Arc<Mutex<f32>>,
     pub solenoid: Arc<Mutex<RelayState>>,
     handle: thread::JoinHandle<()>,
@@ -198,9 +181,9 @@ impl Outputs {
 }
 
 pub struct Board<'a> {
-    pub indicators: Indicators,
     pub sensors: Sensors<'a>,
     pub outputs: Outputs,
+    indicator: Ring,
 }
 
 impl<'a> Board<'a> {
@@ -219,38 +202,13 @@ impl<'a> Board<'a> {
         let led_pin = peripherals.pins.gpio21;
         let channel = peripherals.rmt.channel0;
 
-        let indicator_ring = Arc::new(Mutex::new(IndicatorState::Busy));
-        let indicator_killswitch = Arc::new(Mutex::new(false));
-
-        let indicator_ring_clone = indicator_ring.clone();
-        let indicator_killswitch_clone = indicator_killswitch.clone();
-
-        let indicator_handle = thread::Builder::new()
-            .name("indicator".to_string())
-            .spawn(move || {
-                let mut ring = Ring::new(
-                    channel,
-                    led_pin,
-                    config::LED_COUNT,
-                    config::LED_REFRESH_INTERVAL,
-                );
-                ring.set_state(IndicatorState::Busy);
-
-                log::info!("Starting indicator thread");
-                loop {
-                    if *indicator_killswitch_clone.lock().unwrap() {
-                        ring.set_state(IndicatorState::Off);
-                        log::info!("Indicator thread killed");
-                        return;
-                    }
-                    let requested_indicator_state = *indicator_ring_clone.lock().unwrap();
-                    if ring.state != requested_indicator_state {
-                        ring.set_state(requested_indicator_state);
-                    }
-                    thread::sleep(ring.tick());
-                }
-            })
-            .expect("Failed to spawn indicator thread");
+        let ring = Ring::new(
+            channel,
+            led_pin,
+            config::LED_REFRESH_INTERVAL,
+            config::LED_COUNT,
+        );
+        ring.set_state(IndicatorState::Busy);
 
         operational_state
             .transition(Transitions::StartingUpStage("Input Setup".to_string()))
@@ -385,7 +343,6 @@ impl<'a> Board<'a> {
             .expect("Failed to set operational state");
         log::info!("Setting up outputs");
 
-        let boiler_duty_cycle = Arc::new(Mutex::new(0.0));
         let pump_duty_cycle = Arc::new(Mutex::new(0.0));
         let pump_duty_cycle_clone = pump_duty_cycle.clone();
         let solenoid_state = Arc::new(Mutex::new(RelayState::Off));
@@ -395,7 +352,7 @@ impl<'a> Board<'a> {
 
         let element: Element = PwmBuilder::new()
             .with_interval(config::BOILER_PWM_PERIOD)
-            .with_pin(peripherals.pins.gpio12)
+            .with_pin(peripherals.pins.gpio1)
             .build();
 
         let output_thread_handle = std::thread::Builder::new()
@@ -403,10 +360,10 @@ impl<'a> Board<'a> {
             .spawn(move || {
                 let mut pump = PwmBuilder::new()
                     .with_interval(config::PUMP_PWM_PERIOD)
-                    .with_pin(peripherals.pins.gpio14)
+                    .with_pin(peripherals.pins.gpio42)
                     .build();
 
-                let mut solenoid = Relay::new(peripherals.pins.gpio13, Some(true));
+                let mut solenoid = Relay::new(peripherals.pins.gpio2, Some(true));
 
                 loop {
                     if *outputs_killswitch_clone.lock().unwrap() {
@@ -442,13 +399,11 @@ impl<'a> Board<'a> {
             })
             .expect("Failed to spawn output thread");
 
+        log::info!("Board setup complete");
+
         (
             Board {
-                indicators: Indicators {
-                    state: indicator_ring,
-                    handle: indicator_handle,
-                    kill_switch: indicator_killswitch,
-                },
+                indicator: ring,
                 sensors: Sensors {
                     buttons: Buttons {
                         brew_button: button_brew,
@@ -462,7 +417,6 @@ impl<'a> Board<'a> {
                     pressure,
                 },
                 outputs: Outputs {
-                    boiler_duty_cycle,
                     pump_duty_cycle,
                     solenoid: solenoid_state,
                     handle: output_thread_handle,
@@ -509,7 +463,6 @@ impl<'a> Board<'a> {
 }
 
 pub enum Action {
-    SetBoilerDutyCycle(f32),
     SetPumpDutyCycle(f32),
     OpenValve(Option<Duration>),
     CloseValve(Option<Duration>),
@@ -522,9 +475,6 @@ impl Action {
     pub fn execute(&self, board: Arc<Mutex<Board>>) {
         let board = board.lock().unwrap();
         match self {
-            Action::SetBoilerDutyCycle(duty_cycle) => {
-                *board.outputs.boiler_duty_cycle.lock().unwrap() = *duty_cycle;
-            }
             Action::SetPumpDutyCycle(duty_cycle) => {
                 *board.outputs.pump_duty_cycle.lock().unwrap() = *duty_cycle;
             }
@@ -535,13 +485,13 @@ impl Action {
                 board.close_valve(*duration);
             }
             Action::SetIndicator(state) => {
-                board.indicators.set_state(*state);
+                board.indicator.set_state(*state);
             }
             Action::Error => {
-                board.indicators.set_state(IndicatorState::Error);
+                board.indicator.set_state(IndicatorState::Error);
             }
             Action::Panic => {
-                board.indicators.set_state(IndicatorState::Panic);
+                board.indicator.set_state(IndicatorState::Panic);
             }
         }
     }
