@@ -1,6 +1,6 @@
 // [ ] Go through all the "expects" and change them to put the system into an error/panic state
 // [ ] Remove this later, just silence warnings while we're doing large scale writing
-#![allow(dead_code)]
+// #![allow(dead_code)]
 mod api;
 mod app_state;
 mod board;
@@ -106,6 +106,8 @@ fn main() -> Result<()> {
         .transition(SystemTransition::Idle)
         .expect("Invalid transition :(");
 
+    let weight = system.board.lock().unwrap().scale.weight.clone();
+
     loop {
         let system_state = system.system_state.lock().unwrap().clone();
         let operational_state = system.operational_state.lock().unwrap().clone();
@@ -119,7 +121,7 @@ fn main() -> Result<()> {
                     OperationalState::Idle => {
                         log::debug!("Boiler temperature: {}", boiler_temperature);
                         log::debug!("Pump pressure: {}", pump_pressure);
-                        log::debug!("Weight: {}", system.read_f32(F32Read::ScaleWeight));
+                        log::debug!("Weight: {}", *weight.read().unwrap());
                         let _ = system.execute_board_action(Action::SetIndicator(
                             indicator::ring::State::Idle,
                         ));

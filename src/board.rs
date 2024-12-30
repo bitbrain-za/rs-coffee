@@ -10,7 +10,7 @@ use crate::indicator::ring::{Ring, State as IndicatorState};
 use crate::sensors::pressure::SeeedWaterPressureSensor;
 #[cfg(not(feature = "simulate"))]
 use crate::sensors::pt100::Pt100;
-use crate::sensors::scale::Scale as LoadCell;
+use crate::sensors::scale::{Interface as LoadCell, Scale};
 use crate::state_machines::{
     operational_fsm::{OperationalState, Transitions},
     ArcMutexState,
@@ -89,19 +89,6 @@ where
     }
 }
 
-pub struct Scale {
-    weight: Arc<Mutex<f32>>,
-}
-
-impl Scale {
-    pub fn get_weight(&self) -> f32 {
-        *self.weight.lock().unwrap()
-    }
-    pub fn set_weight(&self, weight: f32) {
-        *self.weight.lock().unwrap() = weight;
-    }
-}
-
 #[derive(Default)]
 pub struct Pressure {
     pressure: f32,
@@ -124,7 +111,6 @@ impl Pressure {
 
 pub struct Sensors<'a> {
     pub buttons: Buttons<'a, Gpio6, Gpio15, Gpio7>,
-    pub scale: Scale,
     pub pressure: Arc<Mutex<Pressure>>,
     handle: thread::JoinHandle<()>,
     kill_switch: Arc<Mutex<bool>>,
@@ -154,6 +140,7 @@ pub struct Board<'a> {
     pub outputs: Outputs,
     indicator: Ring,
     pub temperature: Arc<RwLock<f32>>,
+    pub scale: LoadCell,
 }
 
 impl<'a> Board<'a> {
@@ -227,24 +214,16 @@ impl<'a> Board<'a> {
         log::info!("Setting up scale");
         let dt = peripherals.pins.gpio36;
         let sck = peripherals.pins.gpio35;
-        let weight = Arc::new(Mutex::new(0.0));
-        let mut loadcell = LoadCell::new(
+        let loadcell = Scale::start(
             sck,
             dt,
-            config::LOAD_SENSOR_SCALING,
             config::SCALE_POLLING_RATE_MS,
             config::SCALE_SAMPLES,
         )
         .unwrap();
-        loadcell.tare(32);
-
-        while !loadcell.is_ready() {
-            std::thread::sleep(Duration::from_millis(100));
-        }
 
         let sensor_killswitch = Arc::new(Mutex::new(false));
         let sensor_killswitch_clone = sensor_killswitch.clone();
-        let weight_clone = weight.clone();
         let sensor_handle = thread::Builder::new()
             .name("sensor".to_string())
             .spawn(move || {
@@ -267,22 +246,11 @@ impl<'a> Board<'a> {
                     config::ADC_SAMPLES,
                 );
 
-                let mut poll_counter = 10;
-
                 loop {
                     if *sensor_killswitch_clone.lock().unwrap() {
                         log::info!("Sensor thread killed");
                         return;
                     }
-
-                    // Only poll scale every 100ms
-                    if poll_counter == 10 {
-                        poll_counter = 0;
-                        if let Some(reading) = loadcell.read() {
-                            *weight_clone.lock().unwrap() = reading;
-                        }
-                    }
-
                     #[cfg(feature = "simulate")]
                     if let Some((_, pressure)) = adc.read() {
                         pressure_clone
@@ -379,13 +347,13 @@ impl<'a> Board<'a> {
             Board {
                 indicator: ring,
                 temperature,
+                scale: loadcell,
                 sensors: Sensors {
                     buttons: Buttons {
                         brew_button: button_brew,
                         steam_button: button_steam,
                         hot_water_button: button_hot_water,
                     },
-                    scale: Scale { weight },
                     handle: sensor_handle,
                     kill_switch: sensor_killswitch,
                     pressure,
@@ -472,9 +440,7 @@ impl Action {
 }
 
 pub enum Reading {
-    BoilerTemperature(Option<f32>),
     PumpPressure(Option<f32>),
-    ScaleWeight(Option<f32>),
     BrewSwitchState(Option<bool>),
     SteamSwitchState(Option<bool>),
     HotWaterSwitchState(Option<bool>),
@@ -485,14 +451,9 @@ impl Reading {
     pub fn get(&self, board: Arc<Mutex<Board>>) -> Self {
         let mut board = board.lock().unwrap();
         match self {
-            Reading::BoilerTemperature(_) => {
-                let temperature = *board.temperature.read().unwrap();
-                Reading::BoilerTemperature(Some(temperature))
-            }
             Reading::PumpPressure(_) => {
                 Reading::PumpPressure(Some(board.sensors.pressure.lock().unwrap().get_pressure()))
             }
-            Reading::ScaleWeight(_) => Reading::ScaleWeight(Some(board.sensors.scale.get_weight())),
             Reading::BrewSwitchState(_) => {
                 Reading::BrewSwitchState(Some(board.sensors.buttons.brew_button.was_pressed()))
             }
@@ -512,7 +473,6 @@ impl Reading {
 pub enum F32Read {
     BoilerTemperature,
     PumpPressure,
-    ScaleWeight,
     PumpDutyCycle,
 }
 
@@ -522,7 +482,6 @@ impl F32Read {
         match self {
             F32Read::BoilerTemperature => *board.temperature.read().unwrap(),
             F32Read::PumpPressure => board.sensors.pressure.lock().unwrap().get_pressure(),
-            F32Read::ScaleWeight => board.sensors.scale.get_weight(),
             F32Read::PumpDutyCycle => *board.outputs.pump_duty_cycle.lock().unwrap(),
         }
     }

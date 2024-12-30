@@ -13,3 +13,4 @@
  - [ ] Implement Level Sensing
  - [ ] SD Card - Wait for next release: https://github.com/esp-rs/esp-idf-svc/issues/467
  - [ ] Display
+ - [ ] Add endpoint to set loadcell scaling

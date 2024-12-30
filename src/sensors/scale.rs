@@ -1,4 +1,8 @@
-use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
+use crate::{
+    config,
+    kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value},
+    schemas::types::Grams,
+};
 use anyhow::Result;
 use esp_idf_svc::hal::{
     delay::Ets,
@@ -6,14 +10,25 @@ use esp_idf_svc::hal::{
     peripheral::Peripheral,
 };
 use loadcell::{hx711::HX711, LoadCell};
+use std::sync::{
+    mpsc::{channel, Sender},
+    Arc, RwLock,
+};
 use std::time::{Duration, Instant};
 
 pub type LoadSensor<'a, SckPin, DtPin> =
     HX711<PinDriver<'a, SckPin, Output>, PinDriver<'a, DtPin, Input>, Ets>;
 
-#[derive(Debug, Default, Copy, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScaleConfig {
-    pub offset: f32,
+    pub scaling: f32,
+}
+impl Default for ScaleConfig {
+    fn default() -> Self {
+        Self {
+            scaling: config::LOAD_SENSOR_SCALING,
+        }
+    }
 }
 
 impl From<&ScaleConfig> for Value {
@@ -43,6 +58,19 @@ impl Storable for ScaleConfig {
     }
 }
 
+pub enum Message {
+    Tare(usize),
+    Scale(f32),
+    SetPollInterval(Duration),
+    SetFilterWindow(usize),
+}
+
+#[derive(Clone)]
+pub struct Interface {
+    pub mailbox: Sender<Message>,
+    pub weight: Arc<RwLock<Grams>>,
+}
+
 pub struct Scale<'a, SckPin, DtPin>
 where
     DtPin: Peripheral<P = DtPin> + Pin + InputPin,
@@ -53,7 +81,7 @@ where
     next_poll: Instant,
     samples: Vec<f32>,
     samples_to_average: usize,
-    last_reading: f32,
+    interface: Interface,
 }
 
 impl<'a, SckPin, DtPin> Scale<'a, SckPin, DtPin>
@@ -61,71 +89,108 @@ where
     DtPin: Peripheral<P = DtPin> + Pin + InputPin,
     SckPin: Peripheral<P = SckPin> + Pin + OutputPin,
 {
-    pub fn new(
-        clock_pin: SckPin,
-        data_pin: DtPin,
-        scaling: f32,
-        poll_interval: Duration,
-        samples: usize,
-    ) -> Result<Self> {
-        let dt = PinDriver::input(data_pin)?;
-        let sck = PinDriver::output(clock_pin)?;
-        let mut load_sensor = HX711::new(sck, dt, Ets);
-
-        load_sensor.set_scale(scaling);
-
-        Ok(Scale {
-            load_sensor,
-            poll_interval,
-            next_poll: Instant::now(),
-            samples: Vec::new(),
-            samples_to_average: samples,
-            last_reading: 0.0,
-        })
-    }
-
-    pub fn is_ready(&self) -> bool {
+    fn is_ready(&self) -> bool {
         self.load_sensor.is_ready()
     }
 
-    pub fn tare(&mut self, times: usize) {
+    fn tare(&mut self, times: usize) {
         self.load_sensor.tare(times);
     }
 
-    pub fn read(&mut self) -> Option<f32> {
-        match self.load_sensor.read_scaled() {
-            Ok(reading) => {
-                if self.samples_to_average > 0 {
-                    self.samples.push(reading);
-                    if self.samples.len() > self.samples_to_average {
-                        let reading = self.samples.iter().sum::<f32>() / self.samples.len() as f32;
-                        self.samples.clear();
-                        Some(reading)
-                    } else {
-                        None
-                    }
-                } else {
-                    Some(reading)
-                }
+    fn read(&mut self) -> Option<f32> {
+        if let Ok(reading) = self.load_sensor.read_scaled() {
+            self.samples.push(reading);
+            if self.samples.len() > self.samples_to_average {
+                self.samples
+                    .drain(0..(self.samples.len() - self.samples_to_average));
             }
-            Err(e) => {
-                log::error!("Failed to read from load sensor: {:?}", e);
-                // [ ] add an error state
-                None
-            }
+        }
+        if self.samples.is_empty() {
+            None
+        } else {
+            Some(self.samples.iter().sum::<f32>() / self.samples.len() as f32)
         }
     }
 
-    pub fn poll(&mut self) -> Duration {
+    fn poll(&mut self) -> Duration {
         if Instant::now() < self.next_poll {
             return self.next_poll - Instant::now();
         }
 
         if let Some(reading) = self.read() {
-            self.last_reading = reading;
+            *self.interface.weight.write().unwrap() = reading;
         }
 
-        self.next_poll = Instant::now() + self.poll_interval - Duration::from_millis(1);
+        self.next_poll = Instant::now() + self.poll_interval;
         self.poll_interval
+    }
+
+    pub fn start(
+        clock_pin: SckPin,
+        data_pin: DtPin,
+        poll_interval: Duration,
+        samples: usize,
+    ) -> Result<Interface> {
+        let dt = PinDriver::input(data_pin)?;
+        let sck = PinDriver::output(clock_pin)?;
+        let mut load_sensor = HX711::new(sck, dt, Ets);
+
+        let scaling = ScaleConfig::load_or_default().scaling;
+
+        let (tx, rx) = channel();
+
+        let interface = Interface {
+            mailbox: tx,
+            weight: Arc::new(RwLock::new(0.0)),
+        };
+
+        load_sensor.set_scale(scaling);
+
+        let loadcell = Scale {
+            load_sensor,
+            poll_interval,
+            next_poll: Instant::now(),
+            samples: Vec::new(),
+            samples_to_average: samples,
+            interface: interface.clone(),
+        };
+
+        std::thread::Builder::new()
+            .name("Scale".to_string())
+            .spawn(move || {
+                let mut loadcell = loadcell;
+
+                while loadcell.is_ready() {
+                    std::thread::sleep(poll_interval);
+                }
+                loadcell.tare(samples);
+                loop {
+                    while let Ok(message) = rx.try_recv() {
+                        match message {
+                            Message::Tare(times) => {
+                                loadcell.samples.clear();
+                                loadcell.tare(times);
+                            }
+                            Message::Scale(scaling) => {
+                                loadcell.samples.clear();
+                                loadcell.load_sensor.set_scale(scaling);
+                                let _ = ScaleConfig { scaling }.save();
+                            }
+                            Message::SetPollInterval(duration) => {
+                                loadcell.poll_interval = duration;
+                                loadcell.next_poll = Instant::now();
+                            }
+                            Message::SetFilterWindow(samples) => {
+                                loadcell.samples_to_average = samples;
+                            }
+                        }
+                    }
+
+                    std::thread::sleep(loadcell.poll());
+                }
+            })
+            .unwrap();
+
+        Ok(interface)
     }
 }
