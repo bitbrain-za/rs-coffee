@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use esp_idf_hal::gpio::{InterruptType, PinDriver, Pull};
 use esp_idf_svc::hal::gpio::{Input, InputPin, OutputPin};
 use std::sync::{Arc, Mutex};
