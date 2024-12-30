@@ -230,6 +230,7 @@ fn main() -> Result<()> {
                 SwitchesState::Idle => {
                     log::info!("Switched to idle");
                     boiler.send_message(BoilerMessage::SetMode(components::boiler::Mode::Off));
+                    pump.turn_off();
                 }
                 SwitchesState::Brew => {
                     log::info!("Switched to brew");
@@ -242,6 +243,7 @@ fn main() -> Result<()> {
                     log::info!("Switched to hot water");
                     let mode = components::boiler::Mode::Mpc { target: 94.0 };
                     boiler.send_message(BoilerMessage::SetMode(mode));
+                    pump.turn_on_for_hot_water();
                 }
                 SwitchesState::Steam => {
                     log::info!("Switched to steam");
@@ -249,10 +251,18 @@ fn main() -> Result<()> {
                         upper_threshold: 140.0,
                         lower_threshold: 120.0,
                     };
+                    pump.turn_off();
                     boiler.send_message(BoilerMessage::SetMode(mode));
+                }
+                SwitchesState::Backflush => {
+                    log::info!("Switched to backflush");
+                    let mode = components::boiler::Mode::Mpc { target: 70.0 };
+                    boiler.send_message(BoilerMessage::SetMode(mode));
+                    pump.backflush();
                 }
                 SwitchesState::AutoTune => {
                     log::info!("Switched to auto-tune");
+                    pump.turn_off();
                     if let Err(e) = system.operational_state.lock().unwrap().transition(
                         crate::state_machines::operational_fsm::Transitions::StartAutoTune,
                     ) {

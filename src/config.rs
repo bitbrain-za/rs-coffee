@@ -12,6 +12,9 @@ pub const BOILER_PWM_PERIOD: Duration = Duration::from_millis(1000);
 pub const PUMP_PWM_PERIOD: Duration = Duration::from_millis(100);
 pub const OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+pub const BACKFLUSH_ON_TIME: Duration = Duration::from_secs(10);
+pub const BACKFLUSH_OFF_TIME: Duration = Duration::from_secs(10);
+
 pub const PT_100_CALIBRATION_FACTOR: f32 = 2.209;
 
 pub const LED_COUNT: usize = 32;

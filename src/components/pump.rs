@@ -16,7 +16,7 @@ pub enum Message {
     OnForTimeAtPressure(Duration, Bar),
     OnForYield { pressure: Bar, grams: Grams },
     OnForHotWater,
-    Backflush(Duration),
+    Backflush,
 }
 
 pub type Mailbox = Sender<Message>;
@@ -45,12 +45,19 @@ impl Interface {
             .send(Message::OnForYield { pressure, grams })
             .unwrap();
     }
+    pub fn turn_on_for_hot_water(&self) {
+        self.mailbox.send(Message::OnForHotWater).unwrap();
+    }
+    pub fn backflush(&self) {
+        self.mailbox.send(Message::Backflush).unwrap();
+    }
 }
 
 enum State {
     On(Option<Instant>),
     Off,
     OnForYield { start: Grams, target: Grams },
+    Backflush,
 }
 
 pub struct Pump<PD: OutputPin, PE: OutputPin> {
@@ -59,6 +66,8 @@ pub struct Pump<PD: OutputPin, PE: OutputPin> {
     pressure_probe: Arc<RwLock<Bar>>,
     weight_probe: Arc<RwLock<Grams>>,
     state: State,
+    backflush_cycle_start: Instant,
+    backflush_in_off_cycle: bool,
 }
 
 impl<PD, PE> Pump<PD, PE>
@@ -82,6 +91,8 @@ where
                 pressure_probe,
                 weight_probe,
                 state: State::Off,
+                backflush_cycle_start: Instant::now(),
+                backflush_in_off_cycle: true,
             };
             loop {
                 while let Ok(message) = rx.try_recv() {
@@ -96,6 +107,22 @@ where
                         let current_scale = *my_pump.weight_probe.read().unwrap();
                         if current_scale - start >= target {
                             my_pump.trasition(Message::Off);
+                        }
+                    }
+                    State::Backflush => {
+                        let elapsed = my_pump.backflush_cycle_start.elapsed();
+
+                        if elapsed > config::BACKFLUSH_OFF_TIME + config::BACKFLUSH_ON_TIME {
+                            my_pump.backflush_cycle_start = Instant::now();
+                            my_pump.open_valve();
+                            my_pump.set_pressure(config::MAX_PUMP_PRESSURE);
+                            my_pump.backflush_in_off_cycle = false;
+                        } else if elapsed > config::BACKFLUSH_ON_TIME
+                            && !my_pump.backflush_in_off_cycle
+                        {
+                            my_pump.backflush_in_off_cycle = true;
+                            my_pump.close_valve();
+                            my_pump.set_pressure(0.0);
                         }
                     }
                     _ => {}
@@ -168,8 +195,12 @@ where
                 self.close_valve();
                 self.set_pressure(config::MAX_PUMP_PRESSURE);
             }
-            Message::Backflush(_) => {
-                todo!();
+            Message::Backflush => {
+                self.state = State::Backflush;
+                self.backflush_cycle_start = Instant::now();
+                self.backflush_in_off_cycle = false;
+                self.open_valve();
+                self.set_pressure(config::MAX_PUMP_PRESSURE);
             }
         }
     }
