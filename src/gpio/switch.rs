@@ -28,11 +28,26 @@ pub enum SwitchesState {
     Brew,
     HotWater,
     Steam,
+    AutoTune,
+}
+
+impl std::fmt::Display for SwitchesState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = match self {
+            Self::Idle => "Idle",
+            Self::Brew => "Brew",
+            Self::HotWater => "Hot Water",
+            Self::Steam => "Steam",
+            Self::AutoTune => "Steam",
+        };
+        write!(f, "{}", state)
+    }
 }
 
 impl SwitchesState {
     fn update(&self, brew: SwitchState, hot_water: SwitchState, steam: SwitchState) -> Self {
         match (brew, hot_water, steam) {
+            (SwitchState::Active, SwitchState::Active, SwitchState::Active) => Self::AutoTune,
             (SwitchState::Active, _, _) => Self::Brew,
             (_, SwitchState::Active, _) => Self::HotWater,
             (_, _, SwitchState::Active) => Self::Steam,
