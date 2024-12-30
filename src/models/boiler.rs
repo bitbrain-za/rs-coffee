@@ -1,6 +1,6 @@
-use super::{Temperature, Watts};
 use crate::config;
 use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
+use crate::types::{Temperature, Watts};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 

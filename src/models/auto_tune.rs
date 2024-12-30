@@ -1,7 +1,8 @@
-use super::{Temperature, Watts};
 use crate::components::boiler::{Message as ElementMessage, Mode as ElementMode};
-use crate::{app_state::System, config, models::boiler::BoilerModelParameters};
+use crate::types::{Temperature, Watts};
+use crate::{config, models::boiler::BoilerModelParameters};
 use esp_idf_hal::delay::FreeRtos;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 fn convert_to_dilated_time(duration: Duration) -> Duration {
@@ -145,7 +146,7 @@ pub struct HeuristicAutoTuner {
     element_power: ElementControlOption,
     modeled_temperature: Temperature,
     percentage_complete: f32,
-    system: System,
+    temperature_probe: Arc<RwLock<Temperature>>,
     pub boiler: Option<crate::components::boiler::Boiler>,
 }
 
@@ -685,7 +686,7 @@ impl SteadyStateTest {
 }
 
 impl HeuristicAutoTuner {
-    pub fn new(sample_time: Duration, system: System) -> Self {
+    pub fn new(sample_time: Duration, temperature_probe: Arc<RwLock<Temperature>>) -> Self {
         Self {
             sample_time,
             state: HeuristicAutoTunerState::default(),
@@ -696,14 +697,13 @@ impl HeuristicAutoTuner {
             element_power: ElementControlOption::None,
             modeled_temperature: 0.0,
             percentage_complete: 0.0,
-            system,
+            temperature_probe,
             boiler: None,
         }
     }
 
     fn get_probe(&self) -> Temperature {
-        self.system
-            .read_f32(crate::board::F32Read::BoilerTemperature)
+        *self.temperature_probe.read().unwrap()
     }
 
     pub fn get_model_boiler_temperature(&self) -> Temperature {

@@ -1,6 +1,6 @@
 // [ ] Go through all the "expects" and change them to put the system into an error/panic state
 // [ ] Remove this later, just silence warnings while we're doing large scale writing
-// #![allow(dead_code)]
+#![allow(dead_code)]
 mod api;
 mod app_state;
 mod board;
@@ -13,28 +13,35 @@ mod models;
 mod schemas;
 mod sensors;
 mod state_machines;
+mod types;
 use crate::components::boiler::Message as BoilerMessage;
 use anyhow::Result;
 use app_state::System;
-use board::{Action, F32Read, Reading};
+use board::Action;
 use dotenv_codegen::dotenv;
+use gpio::switch::SwitchesState;
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use std::time::Duration;
 
 const SIMULATE_AUTO_TUNE: bool = false;
 #[cfg(feature = "simulate")]
-fn simulate_auto_tuner(system: System, boiler: crate::components::boiler::Boiler) {
+fn simulate_auto_tuner(
+    temperature_probe: Arc<RwLock<f32>>,
+    boiler: crate::components::boiler::Boiler,
+) {
     if SIMULATE_AUTO_TUNE {
         log::info!("Running simulation");
-        let mut auto_tuner =
-            models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000), system.clone());
+        let mut auto_tuner = models::auto_tune::HeuristicAutoTuner::new(
+            Duration::from_millis(1000),
+            temperature_probe.clone(),
+        );
         auto_tuner.boiler = Some(boiler.clone());
         match auto_tuner.auto_tune_blocking() {
             Ok(res) => {
-                let probe_temperature = system.read_f32(board::F32Read::BoilerTemperature);
+                let probe_temperature = *temperature_probe.read().unwrap();
                 let message = components::boiler::Message::UpdateParameters {
                     parameters: res,
                     initial_probe_temperature: probe_temperature,
@@ -58,7 +65,7 @@ fn main() -> Result<()> {
 
     let logger = esp_idf_svc::log::EspLogger;
     logger
-        .set_target_level("*", log::LevelFilter::Debug)
+        .set_target_level("*", log::LevelFilter::Info)
         .unwrap();
     logger
         .set_target_level("rmt(legacy)", log::LevelFilter::Info)
@@ -66,16 +73,16 @@ fn main() -> Result<()> {
     logger
         .set_target_level("efuse", log::LevelFilter::Info)
         .unwrap();
+    logger
+        .set_target_level("temperature_sensor", log::LevelFilter::Info)
+        .unwrap();
+    logger
+        .set_target_level("rs_coffee", log::LevelFilter::Debug)
+        .unwrap();
 
     log::info!("Starting up");
 
     let (system, element) = System::new();
-    {
-        let board = system.board.lock().unwrap();
-        *board.outputs.pump_duty_cycle.lock().unwrap() = 0.2;
-        *board.outputs.solenoid.lock().unwrap() =
-            gpio::relay::State::on(Some(Duration::from_secs(5)));
-    }
     let api_state = app_state::ApiData {
         echo_data: "Init".to_string(),
         drink: None,
@@ -91,13 +98,15 @@ fn main() -> Result<()> {
     api::mqtt::mqtt_create(&mqtt_url, mqtt_client_id, &system);
 
     let temperature_probe = system.board.lock().unwrap().temperature.clone();
-    let boiler = components::boiler::Boiler::new(element, temperature_probe);
+    let boiler = components::boiler::Boiler::new(element, temperature_probe.clone());
 
-    simulate_auto_tuner(system.clone(), boiler.clone());
+    simulate_auto_tuner(temperature_probe.clone(), boiler.clone());
 
     let mut loop_interval = Duration::from_millis(1000);
-    let mut auto_tuner =
-        models::auto_tune::HeuristicAutoTuner::new(Duration::from_millis(1000), system.clone());
+    let mut auto_tuner = models::auto_tune::HeuristicAutoTuner::new(
+        Duration::from_millis(1000),
+        temperature_probe.clone(),
+    );
 
     system
         .system_state
@@ -107,6 +116,11 @@ fn main() -> Result<()> {
         .expect("Invalid transition :(");
 
     let weight = system.board.lock().unwrap().scale.weight.clone();
+    let switches = system.board.lock().unwrap().switches.clone();
+    let pressure_probe = system.board.lock().unwrap().pressure.clone();
+    let pump = system.board.lock().unwrap().pump.clone();
+
+    let mut previous_switch_state = SwitchesState::Idle;
 
     loop {
         let system_state = system.system_state.lock().unwrap().clone();
@@ -114,8 +128,8 @@ fn main() -> Result<()> {
 
         match (system_state, operational_state) {
             (SystemState::Healthy, operational_state) => {
-                let boiler_temperature = system.read_f32(F32Read::BoilerTemperature);
-                let pump_pressure = system.read_f32(F32Read::PumpPressure);
+                let boiler_temperature = *temperature_probe.read().unwrap();
+                let pump_pressure = *pressure_probe.read().unwrap();
 
                 match operational_state {
                     OperationalState::Idle => {
@@ -162,7 +176,7 @@ fn main() -> Result<()> {
                         }
                         auto_tuner = models::auto_tune::HeuristicAutoTuner::new(
                             Duration::from_millis(1000),
-                            system.clone(),
+                            temperature_probe.clone(),
                         );
                     }
                     OperationalState::AutoTuning => {
@@ -207,32 +221,46 @@ fn main() -> Result<()> {
             }
         }
 
-        if let Reading::AllButtonsState(Some(presses)) =
-            system.do_board_read(Reading::AllButtonsState(None))
-        {
-            if !presses.is_empty() {
-                for button in presses {
-                    log::info!("Button pressed: {}", button);
-
-                    if button == board::ButtonEnum::Brew {
-                        let _ = system
-                            .execute_board_action(Action::OpenValve(Some(Duration::from_secs(5))));
-
-                        let mode = components::boiler::Mode::Mpc { target: 94.0 };
-                        boiler.send_message(BoilerMessage::SetMode(mode));
-                    }
-                    if button == board::ButtonEnum::HotWater {
-                        let mode = components::boiler::Mode::BangBang {
-                            upper_threshold: 95.0,
-                            lower_threshold: 85.0,
-                        };
-                        boiler.send_message(BoilerMessage::SetMode(mode));
-                    }
-                    if button == board::ButtonEnum::Steam {
-                        boiler.send_message(BoilerMessage::SetMode(components::boiler::Mode::Off));
+        let current_state = switches.get_state();
+        if previous_switch_state != current_state {
+            if previous_switch_state == SwitchesState::Brew {
+                system.board.lock().unwrap().scale.stop_brewing();
+            }
+            match current_state {
+                SwitchesState::Idle => {
+                    log::info!("Switched to idle");
+                    boiler.send_message(BoilerMessage::SetMode(components::boiler::Mode::Off));
+                }
+                SwitchesState::Brew => {
+                    log::info!("Switched to brew");
+                    system.board.lock().unwrap().scale.start_brew();
+                    pump.turn_on(Some(Duration::from_secs(5)));
+                    let mode = components::boiler::Mode::Mpc { target: 94.0 };
+                    boiler.send_message(BoilerMessage::SetMode(mode));
+                }
+                SwitchesState::HotWater => {
+                    log::info!("Switched to hot water");
+                    let mode = components::boiler::Mode::Mpc { target: 94.0 };
+                    boiler.send_message(BoilerMessage::SetMode(mode));
+                }
+                SwitchesState::Steam => {
+                    log::info!("Switched to steam");
+                    let mode = components::boiler::Mode::BangBang {
+                        upper_threshold: 140.0,
+                        lower_threshold: 120.0,
+                    };
+                    boiler.send_message(BoilerMessage::SetMode(mode));
+                }
+                SwitchesState::AutoTune => {
+                    log::info!("Switched to auto-tune");
+                    if let Err(e) = system.operational_state.lock().unwrap().transition(
+                        crate::state_machines::operational_fsm::Transitions::StartAutoTune,
+                    ) {
+                        log::error!("Failed to transition to auto-tune: {:?}", e);
                     }
                 }
             }
+            previous_switch_state = current_state;
         }
         thread::sleep(loop_interval);
     }

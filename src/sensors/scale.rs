@@ -1,7 +1,7 @@
 use crate::{
     config,
     kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value},
-    schemas::types::Grams,
+    types::Grams,
 };
 use anyhow::Result;
 use esp_idf_svc::hal::{
@@ -69,6 +69,44 @@ pub enum Message {
 pub struct Interface {
     pub mailbox: Sender<Message>,
     pub weight: Arc<RwLock<Grams>>,
+    pub flow: Arc<RwLock<f32>>,
+}
+
+impl Interface {
+    pub fn get_weight(&self) -> f32 {
+        *self.weight.read().unwrap()
+    }
+
+    pub fn get_flow(&self) -> f32 {
+        *self.flow.read().unwrap()
+    }
+
+    pub fn tare(&self, times: usize) {
+        let _ = self.mailbox.send(Message::Tare(times));
+    }
+
+    pub fn set_scaling(&self, scaling: f32) {
+        let _ = self.mailbox.send(Message::Scale(scaling));
+    }
+
+    pub fn set_poll_interval(&self, duration: Duration) {
+        let _ = self.mailbox.send(Message::SetPollInterval(duration));
+    }
+
+    pub fn set_filter_window(&self, samples: usize) {
+        let _ = self.mailbox.send(Message::SetFilterWindow(samples));
+    }
+
+    pub fn start_brew(&self) {
+        self.set_filter_window(10);
+        self.set_poll_interval(Duration::from_millis(50));
+        self.tare(32)
+    }
+
+    pub fn stop_brewing(&self) {
+        self.set_filter_window(8);
+        self.set_poll_interval(Duration::from_millis(250));
+    }
 }
 
 pub struct Scale<'a, SckPin, DtPin>
@@ -79,7 +117,7 @@ where
     load_sensor: LoadSensor<'a, SckPin, DtPin>,
     poll_interval: Duration,
     next_poll: Instant,
-    samples: Vec<f32>,
+    samples: Vec<(Instant, f32)>,
     samples_to_average: usize,
     interface: Interface,
 }
@@ -99,7 +137,7 @@ where
 
     fn read(&mut self) -> Option<f32> {
         if let Ok(reading) = self.load_sensor.read_scaled() {
-            self.samples.push(reading);
+            self.samples.push((Instant::now(), reading));
             if self.samples.len() > self.samples_to_average {
                 self.samples
                     .drain(0..(self.samples.len() - self.samples_to_average));
@@ -108,8 +146,21 @@ where
         if self.samples.is_empty() {
             None
         } else {
-            Some(self.samples.iter().sum::<f32>() / self.samples.len() as f32)
+            Some(self.samples.iter().map(|(_, m)| m).sum::<f32>() / self.samples.len() as f32)
         }
+    }
+
+    fn estimate_flow(&self) {
+        let samples = &self.samples;
+        if samples.len() < self.samples_to_average {
+            *self.interface.flow.write().unwrap() = 0.0;
+        }
+
+        let (first, last) = (samples.first().unwrap(), samples.last().unwrap());
+        let time = last.0 - first.0;
+        let weight = last.1 - first.1;
+
+        *self.interface.flow.write().unwrap() = weight / time.as_secs_f32();
     }
 
     fn poll(&mut self) -> Duration {
@@ -119,6 +170,7 @@ where
 
         if let Some(reading) = self.read() {
             *self.interface.weight.write().unwrap() = reading;
+            self.estimate_flow();
         }
 
         self.next_poll = Instant::now() + self.poll_interval;
@@ -142,6 +194,7 @@ where
         let interface = Interface {
             mailbox: tx,
             weight: Arc::new(RwLock::new(0.0)),
+            flow: Arc::new(RwLock::new(0.0)),
         };
 
         load_sensor.set_scale(scaling);

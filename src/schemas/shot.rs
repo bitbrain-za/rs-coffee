@@ -1,5 +1,6 @@
-use super::{types::*, Error};
+use super::Error;
 use crate::config::Shots as config;
+use crate::types::*;
 use serde::{Deserialize, Serialize};
 use serde_json;
 

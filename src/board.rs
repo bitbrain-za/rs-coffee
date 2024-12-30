@@ -1,16 +1,14 @@
 use crate::config;
 use crate::gpio::{
     adc::Adc,
-    button::Button,
     pwm::{Pwm, PwmBuilder},
-    relay::Relay,
-    relay::State as RelayState,
+    switch::Switches,
 };
 use crate::indicator::ring::{Ring, State as IndicatorState};
 use crate::sensors::pressure::SeeedWaterPressureSensor;
-#[cfg(not(feature = "simulate"))]
 use crate::sensors::pt100::Pt100;
 use crate::sensors::scale::{Interface as LoadCell, Scale};
+use crate::sensors::traits::TemperatureProbe;
 use crate::state_machines::{
     operational_fsm::{OperationalState, Transitions},
     ArcMutexState,
@@ -21,7 +19,7 @@ use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
 };
-use esp_idf_svc::hal::gpio::{Gpio1, Gpio15, Gpio6, Gpio7, InputPin, OutputPin};
+use esp_idf_svc::hal::gpio::Gpio1;
 use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
 use esp_idf_svc::timer::EspTaskTimerService;
@@ -31,119 +29,19 @@ use esp_idf_svc::{
 };
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use std::time::Duration;
 
 pub type Element = Pwm<'static, Gpio1>;
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum ButtonEnum {
-    Brew,
-    Steam,
-    HotWater,
-}
-
-impl std::fmt::Display for ButtonEnum {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ButtonEnum::Brew => write!(f, "Brew"),
-            ButtonEnum::Steam => write!(f, "Steam"),
-            ButtonEnum::HotWater => write!(f, "Hot Water"),
-        }
-    }
-}
-
-pub struct Buttons<'a, PA: InputPin + OutputPin, PB: InputPin + OutputPin, PC: InputPin + OutputPin>
-{
-    brew_button: Button<'a, PA>,
-    steam_button: Button<'a, PB>,
-    hot_water_button: Button<'a, PC>,
-}
-
-impl<'a, PA, PB, PC> Buttons<'a, PA, PB, PC>
-where
-    PA: InputPin + OutputPin,
-    PB: InputPin + OutputPin,
-    PC: InputPin + OutputPin,
-{
-    pub fn was_button_pressed(&mut self, button: ButtonEnum) -> bool {
-        match button {
-            ButtonEnum::Brew => self.brew_button.was_pressed(),
-            ButtonEnum::Steam => self.steam_button.was_pressed(),
-            ButtonEnum::HotWater => self.hot_water_button.was_pressed(),
-        }
-    }
-
-    pub fn button_presses(&mut self) -> Vec<ButtonEnum> {
-        let mut buttons = Vec::new();
-
-        if self.was_button_pressed(ButtonEnum::Brew) {
-            buttons.push(ButtonEnum::Brew);
-        }
-        if self.was_button_pressed(ButtonEnum::Steam) {
-            buttons.push(ButtonEnum::Steam);
-        }
-        if self.was_button_pressed(ButtonEnum::HotWater) {
-            buttons.push(ButtonEnum::HotWater);
-        }
-        buttons
-    }
-}
-
-#[derive(Default)]
-pub struct Pressure {
-    pressure: f32,
-}
-
-impl Pressure {
-    pub fn get_pressure(&self) -> f32 {
-        self.pressure
-    }
-    pub fn set_pressure(
-        &mut self,
-        voltage: f32,
-        probe: impl crate::sensors::traits::PressureProbe,
-    ) {
-        self.pressure = probe
-            .convert_voltage_to_pressure(voltage)
-            .expect("Failed to convert voltage to pressure");
-    }
-}
-
-pub struct Sensors<'a> {
-    pub buttons: Buttons<'a, Gpio6, Gpio15, Gpio7>,
-    pub pressure: Arc<Mutex<Pressure>>,
-    handle: thread::JoinHandle<()>,
-    kill_switch: Arc<Mutex<bool>>,
-}
-
-impl Sensors<'_> {
-    pub fn kill(&self) {
-        *self.kill_switch.lock().unwrap() = true;
-    }
-}
-
-pub struct Outputs {
-    pub pump_duty_cycle: Arc<Mutex<f32>>,
-    pub solenoid: Arc<Mutex<RelayState>>,
-    handle: thread::JoinHandle<()>,
-    kill_switch: Arc<Mutex<bool>>,
-}
-
-impl Outputs {
-    pub fn kill(&self) {
-        *self.kill_switch.lock().unwrap() = true;
-    }
-}
-
-pub struct Board<'a> {
-    pub sensors: Sensors<'a>,
-    pub outputs: Outputs,
+pub struct Board {
     indicator: Ring,
     pub temperature: Arc<RwLock<f32>>,
     pub scale: LoadCell,
+    pub switches: Switches,
+    pub pressure: Arc<RwLock<f32>>,
+    pub pump: crate::components::pump::Interface,
 }
 
-impl<'a> Board<'a> {
+impl Board {
     pub fn new(operational_state: Arc<Mutex<OperationalState>>) -> (Self, Element) {
         operational_state
             .transition(Transitions::StartingUpStage("Board Setup".to_string()))
@@ -190,25 +88,22 @@ impl<'a> Board<'a> {
         log::info!("Wifi DHCP info: {:?}", ip_info);
         core::mem::forget(wifi);
 
-        log::info!("Setting up buttons");
-        let mut button_brew = Button::new(peripherals.pins.gpio6, None);
-        let mut button_steam = Button::new(peripherals.pins.gpio15, None);
-        let mut button_hot_water = Button::new(peripherals.pins.gpio7, None);
-
-        button_brew.enable();
-        button_steam.enable();
-        button_hot_water.enable();
+        log::info!("Setting up switches");
+        let switches = Switches::new(
+            peripherals.pins.gpio6,
+            peripherals.pins.gpio7,
+            peripherals.pins.gpio15,
+        );
 
         log::info!("Setting up ADCs");
-        let pressure = Arc::new(Mutex::new(Pressure::default()));
+        let pressure_probe = Arc::new(RwLock::new(0.0));
         let temperature = Arc::new(RwLock::new(f32::default()));
-        let pressure_clone = pressure.clone();
         #[cfg(not(feature = "simulate"))]
         let temperature_clone = temperature.clone();
+        let pressure_probe_clone = pressure_probe.clone();
 
         use crate::kv_store::Storable;
         let seed_pressure_probe = SeeedWaterPressureSensor::load_or_default();
-        #[cfg(not(feature = "simulate"))]
         let pt100 = Pt100::load_or_default();
 
         log::info!("Setting up scale");
@@ -224,7 +119,7 @@ impl<'a> Board<'a> {
 
         let sensor_killswitch = Arc::new(Mutex::new(false));
         let sensor_killswitch_clone = sensor_killswitch.clone();
-        let sensor_handle = thread::Builder::new()
+        thread::Builder::new()
             .name("sensor".to_string())
             .spawn(move || {
                 let adc = AdcDriver::new(peripherals.adc1).expect("Failed to create ADC driver");
@@ -251,15 +146,6 @@ impl<'a> Board<'a> {
                         log::info!("Sensor thread killed");
                         return;
                     }
-                    #[cfg(feature = "simulate")]
-                    if let Some((_, pressure)) = adc.read() {
-                        pressure_clone
-                            .lock()
-                            .unwrap()
-                            .set_pressure(pressure, seed_pressure_probe);
-                    }
-
-                    #[cfg(not(feature = "simulate"))]
                     if let Some((temperature, pressure)) = adc.read() {
                         let degrees = match pt100.convert_voltage_to_degrees(temperature) {
                             Ok(degrees) => degrees,
@@ -268,11 +154,24 @@ impl<'a> Board<'a> {
                                 continue;
                             }
                         };
-                        *temperature_clone.write().unwrap() = degrees;
-                        pressure_clone
-                            .lock()
-                            .unwrap()
-                            .set_pressure(pressure, seed_pressure_probe);
+                        #[cfg(not(feature = "simulate"))]
+                        {
+                            *temperature_clone.write().unwrap() = degrees;
+                        }
+                        #[cfg(feature = "simulate")]
+                        {
+                            let _ = degrees;
+                        }
+                        use crate::sensors::traits::PressureProbe;
+                        let pressure =
+                            match seed_pressure_probe.convert_voltage_to_pressure(pressure) {
+                                Ok(pressure) => pressure,
+                                Err(e) => {
+                                    log::error!("Failed to convert voltage to pressure: {:?}", e);
+                                    continue;
+                                }
+                            };
+                        *pressure_probe_clone.write().unwrap() = pressure;
                     }
 
                     FreeRtos::delay_ms(10);
@@ -285,61 +184,18 @@ impl<'a> Board<'a> {
             .expect("Failed to set operational state");
         log::info!("Setting up outputs");
 
-        let pump_duty_cycle = Arc::new(Mutex::new(0.0));
-        let pump_duty_cycle_clone = pump_duty_cycle.clone();
-        let solenoid_state = Arc::new(Mutex::new(RelayState::Off));
-        let solenoid_state_clone = solenoid_state.clone();
-        let outputs_killswitch = Arc::new(Mutex::new(false));
-        let outputs_killswitch_clone = outputs_killswitch.clone();
-
         let element: Element = PwmBuilder::new()
             .with_interval(config::BOILER_PWM_PERIOD)
             .with_pin(peripherals.pins.gpio1)
             .build();
 
-        let output_thread_handle = std::thread::Builder::new()
-            .name("Outputs".to_string())
-            .spawn(move || {
-                let mut pump = PwmBuilder::new()
-                    .with_interval(config::PUMP_PWM_PERIOD)
-                    .with_pin(peripherals.pins.gpio42)
-                    .build();
-
-                let mut solenoid = Relay::new(peripherals.pins.gpio2, Some(true));
-
-                loop {
-                    if *outputs_killswitch_clone.lock().unwrap() {
-                        log::info!("Outputs thread killed");
-                        return;
-                    }
-                    let mut next_tick: Vec<Duration> = vec![config::OUTPUT_POLL_INTERVAL];
-
-                    let requested_pump_duty_cycle = *pump_duty_cycle_clone.lock().unwrap();
-                    if pump.get_duty_cycle() != requested_pump_duty_cycle {
-                        pump.set_duty_cycle(requested_pump_duty_cycle);
-                    }
-                    if let Some(duration) = pump.tick() {
-                        next_tick.push(duration);
-                    }
-
-                    let requested_solenoid_state = *solenoid_state_clone.lock().unwrap();
-                    if solenoid.state != requested_solenoid_state {
-                        solenoid.state = requested_solenoid_state;
-                    }
-                    if let Some(duration) = solenoid.tick() {
-                        next_tick.push(duration);
-                    }
-
-                    FreeRtos::delay_ms(
-                        next_tick
-                            .iter()
-                            .min()
-                            .unwrap_or(&Duration::from_millis(100))
-                            .as_millis() as u32,
-                    );
-                }
-            })
-            .expect("Failed to spawn output thread");
+        let pump = crate::components::pump::Pump::start(
+            peripherals.pins.gpio42,
+            peripherals.pins.gpio2,
+            pressure_probe.clone(),
+            loadcell.weight.clone(),
+            config::PUMP_PWM_PERIOD,
+        );
 
         log::info!("Board setup complete");
 
@@ -348,32 +204,12 @@ impl<'a> Board<'a> {
                 indicator: ring,
                 temperature,
                 scale: loadcell,
-                sensors: Sensors {
-                    buttons: Buttons {
-                        brew_button: button_brew,
-                        steam_button: button_steam,
-                        hot_water_button: button_hot_water,
-                    },
-                    handle: sensor_handle,
-                    kill_switch: sensor_killswitch,
-                    pressure,
-                },
-                outputs: Outputs {
-                    pump_duty_cycle,
-                    solenoid: solenoid_state,
-                    handle: output_thread_handle,
-                    kill_switch: outputs_killswitch,
-                },
+                switches,
+                pump,
+                pressure: pressure_probe,
             },
             element,
         )
-    }
-
-    pub fn open_valve(&self, duration: Option<Duration>) {
-        *self.outputs.solenoid.lock().unwrap() = RelayState::on(duration);
-    }
-    pub fn close_valve(&self, duration: Option<Duration>) {
-        *self.outputs.solenoid.lock().unwrap() = RelayState::off(duration);
     }
 
     async fn connect_wifi(wifi: &mut AsyncWifi<EspWifi<'static>>) -> anyhow::Result<()> {
@@ -405,9 +241,6 @@ impl<'a> Board<'a> {
 }
 
 pub enum Action {
-    SetPumpDutyCycle(f32),
-    OpenValve(Option<Duration>),
-    CloseValve(Option<Duration>),
     SetIndicator(IndicatorState),
     Panic,
     Error,
@@ -417,15 +250,6 @@ impl Action {
     pub fn execute(&self, board: Arc<Mutex<Board>>) {
         let board = board.lock().unwrap();
         match self {
-            Action::SetPumpDutyCycle(duty_cycle) => {
-                *board.outputs.pump_duty_cycle.lock().unwrap() = *duty_cycle;
-            }
-            Action::OpenValve(duration) => {
-                board.open_valve(*duration);
-            }
-            Action::CloseValve(duration) => {
-                board.close_valve(*duration);
-            }
             Action::SetIndicator(state) => {
                 board.indicator.set_state(*state);
             }
@@ -435,71 +259,6 @@ impl Action {
             Action::Panic => {
                 board.indicator.set_state(IndicatorState::Panic);
             }
-        }
-    }
-}
-
-pub enum Reading {
-    PumpPressure(Option<f32>),
-    BrewSwitchState(Option<bool>),
-    SteamSwitchState(Option<bool>),
-    HotWaterSwitchState(Option<bool>),
-    AllButtonsState(Option<Vec<ButtonEnum>>),
-}
-
-impl Reading {
-    pub fn get(&self, board: Arc<Mutex<Board>>) -> Self {
-        let mut board = board.lock().unwrap();
-        match self {
-            Reading::PumpPressure(_) => {
-                Reading::PumpPressure(Some(board.sensors.pressure.lock().unwrap().get_pressure()))
-            }
-            Reading::BrewSwitchState(_) => {
-                Reading::BrewSwitchState(Some(board.sensors.buttons.brew_button.was_pressed()))
-            }
-            Reading::SteamSwitchState(_) => {
-                Reading::SteamSwitchState(Some(board.sensors.buttons.steam_button.was_pressed()))
-            }
-            Reading::HotWaterSwitchState(_) => Reading::HotWaterSwitchState(Some(
-                board.sensors.buttons.hot_water_button.was_pressed(),
-            )),
-            Reading::AllButtonsState(_) => {
-                Reading::AllButtonsState(Some(board.sensors.buttons.button_presses()))
-            }
-        }
-    }
-}
-
-pub enum F32Read {
-    BoilerTemperature,
-    PumpPressure,
-    PumpDutyCycle,
-}
-
-impl F32Read {
-    pub fn get(&self, board: Arc<Mutex<Board>>) -> f32 {
-        let board = board.lock().unwrap();
-        match self {
-            F32Read::BoilerTemperature => *board.temperature.read().unwrap(),
-            F32Read::PumpPressure => board.sensors.pressure.lock().unwrap().get_pressure(),
-            F32Read::PumpDutyCycle => *board.outputs.pump_duty_cycle.lock().unwrap(),
-        }
-    }
-}
-
-pub enum BoolRead {
-    Brew,
-    Steam,
-    HotWater,
-}
-
-impl BoolRead {
-    pub fn get(&self, board: Arc<Mutex<Board>>) -> bool {
-        let mut board = board.lock().unwrap();
-        match self {
-            BoolRead::Brew => board.sensors.buttons.brew_button.was_pressed(),
-            BoolRead::Steam => board.sensors.buttons.steam_button.was_pressed(),
-            BoolRead::HotWater => board.sensors.buttons.hot_water_button.was_pressed(),
         }
     }
 }

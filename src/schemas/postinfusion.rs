@@ -1,4 +1,4 @@
-use super::types::*;
+use crate::types::*;
 use serde::{Deserialize, Serialize};
 use serde_json;
 

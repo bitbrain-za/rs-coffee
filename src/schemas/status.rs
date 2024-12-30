@@ -1,5 +1,5 @@
-use super::types::*;
 use crate::app_state::System;
+use crate::types::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]

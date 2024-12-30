@@ -1,3 +1,4 @@
+use crate::types::*;
 use std::time::Duration;
 
 pub const LOAD_SENSOR_SCALING: f32 = 4.761905;
@@ -16,19 +17,21 @@ pub const PT_100_CALIBRATION_FACTOR: f32 = 2.209;
 pub const LED_COUNT: usize = 32;
 pub const LED_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
-pub const _IDLE_TEMPERATURE: f32 = 60.0;
-pub const BOILER_POWER: f32 = 2000.0;
-pub const INITIAL_TEMPERATURE: f32 = 25.0;
-pub const STAND_IN_AMBIENT: f32 = 25.0;
+pub const _IDLE_TEMPERATURE: Temperature = 60.0;
+pub const BOILER_POWER: Watts = 2000.0;
+pub const INITIAL_TEMPERATURE: Temperature = 25.0;
+pub const STAND_IN_AMBIENT: Temperature = 25.0;
 
-pub const AUTOTUNE_MAX_POWER: f32 = 1000.0;
-pub const AUTOTUNE_STEADY_STATE_POWER: f32 = AUTOTUNE_MAX_POWER * 0.5;
-pub const AUTOTUNE_TARGET_TEMPERATURE: f32 = 94.0;
+pub const AUTOTUNE_MAX_POWER: Watts = 1000.0;
+pub const AUTOTUNE_STEADY_STATE_POWER: Watts = AUTOTUNE_MAX_POWER * 0.5;
+pub const AUTOTUNE_TARGET_TEMPERATURE: Temperature = 94.0;
 pub const STEADY_STATE_TEST_TIME: Duration = Duration::from_secs(600);
 #[cfg(feature = "simulate")]
 pub const TIME_DILATION_FACTOR: f32 = 0.01;
 
 pub const MPC_SMOOTHING_FACTOR: f32 = 0.5;
+
+pub const MAX_PUMP_PRESSURE: Bar = 15.0;
 
 pub struct Shots {}
 

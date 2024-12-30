@@ -9,8 +9,9 @@
  - [ ] Fix up all the state machines/system state/operation state
  - [ ] Maybe an observer patter?
  - [X] Try out mspc channels again
- - [ ] Move ADC to I2C ADC
+ - [ ] Move ADC to I2C ADC (ADS1115)
  - [ ] Implement Level Sensing
  - [ ] SD Card - Wait for next release: https://github.com/esp-rs/esp-idf-svc/issues/467
  - [ ] Display
  - [ ] Add endpoint to set loadcell scaling
+ - [ ] Review config 

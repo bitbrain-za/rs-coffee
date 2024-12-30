@@ -131,40 +131,6 @@
             "attrs": {}
         },
         {
-            "type": "wokwi-pushbutton",
-            "id": "btn1",
-            "top": -3.4,
-            "left": -297.6,
-            "attrs": {
-                "color": "green"
-            }
-        },
-        {
-            "type": "wokwi-pushbutton",
-            "id": "btn2",
-            "top": 44.6,
-            "left": -297.6,
-            "attrs": {
-                "color": "green"
-            }
-        },
-        {
-            "type": "wokwi-pushbutton",
-            "id": "btn3",
-            "top": 92.6,
-            "left": -297.6,
-            "attrs": {
-                "color": "green"
-            }
-        },
-        {
-            "type": "wokwi-vcc",
-            "id": "vcc2",
-            "top": -47.24,
-            "left": -336,
-            "attrs": {}
-        },
-        {
             "type": "wokwi-led-ring",
             "id": "ring1",
             "top": 288.21,
@@ -194,6 +160,34 @@
             "top": 314.03,
             "left": -136.67,
             "rotate": 270,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-slide-switch",
+            "id": "sw1",
+            "top": -5.2,
+            "left": -304.1,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-slide-switch",
+            "id": "sw2",
+            "top": 42.8,
+            "left": -304.1,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-slide-switch",
+            "id": "sw3",
+            "top": 90.8,
+            "left": -304.1,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd5",
+            "top": 153.6,
+            "left": -336.6,
             "attrs": {}
         }
     ],
@@ -334,49 +328,6 @@
             ]
         ],
         [
-            "btn1:2.r",
-            "esp:6",
-            "green",
-            [
-                "h86.6",
-                "v48.2"
-            ]
-        ],
-        [
-            "esp:7",
-            "btn2:2.r",
-            "green",
-            [
-                "h-163.25",
-                "v-9.6"
-            ]
-        ],
-        [
-            "esp:15",
-            "btn3:2.r",
-            "green",
-            [
-                "h-220.85",
-                "v28.8"
-            ]
-        ],
-        [
-            "vcc2:VCC",
-            "btn1:1.l",
-            "red",
-            [
-                "v0"
-            ]
-        ],
-        [
-            "vcc2:VCC",
-            "btn2:1.l",
-            "red",
-            [
-                "v0"
-            ]
-        ],
-        [
             "ring1:GND",
             "gnd6:GND",
             "black",
@@ -400,15 +351,6 @@
             [
                 "v-96",
                 "h-230.4"
-            ]
-        ],
-        [
-            "vcc2:VCC",
-            "btn3:1.l",
-            "red",
-            [
-                "v124.8",
-                "h38.4"
             ]
         ],
         [
@@ -481,6 +423,59 @@
             "green",
             [
                 "h0"
+            ]
+        ],
+        [
+            "sw1:3",
+            "esp:6",
+            "green",
+            [
+                "h134.6",
+                "v48"
+            ]
+        ],
+        [
+            "sw2:3",
+            "esp:7",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "sw3:3",
+            "esp:15",
+            "green",
+            [
+                "h134.6",
+                "v-28.8"
+            ]
+        ],
+        [
+            "gnd5:GND",
+            "sw3:2",
+            "black",
+            [
+                "h38.4",
+                "v-28.8"
+            ]
+        ],
+        [
+            "gnd5:GND",
+            "sw2:2",
+            "black",
+            [
+                "v-67.2",
+                "h38.4"
+            ]
+        ],
+        [
+            "gnd5:GND",
+            "sw1:2",
+            "black",
+            [
+                "v-115.2",
+                "h38.4"
             ]
         ]
     ],
