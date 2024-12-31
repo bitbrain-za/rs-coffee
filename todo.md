@@ -1,7 +1,7 @@
  - [ ] Review timer implementation (https://docs.esp-rs.org/esp-idf-svc/esp_idf_svc/timer/index.html)
- - [ ] Tidy up the state stuff
+ - [X] Tidy up the state stuff
  - [X] Tidy up the board stuff
- - [ ] Add periodic status reporting
+ - [X] Add periodic status reporting
  - [ ] Add Availability
  - [ ] Runtime WIFI config
  - [ ] OTA
@@ -15,3 +15,4 @@
  - [ ] Display
  - [ ] Add endpoint to set loadcell scaling
  - [ ] Review config 
+ - [ ] Move element into boiler properly, create rwlock to monitor power

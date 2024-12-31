@@ -1,5 +1,6 @@
 use super::traits::*;
 use super::FsmError as Error;
+use crate::schemas::status::Operation as OperationReport;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone)]
@@ -82,6 +83,13 @@ impl OperationalState {
             )),
 
             (_, _) => Err(Error::NotYetImplemented),
+        }
+    }
+
+    pub fn to_report(&self) -> OperationReport {
+        OperationReport {
+            state: self.to_string(),
+            attributes: None,
         }
     }
 }

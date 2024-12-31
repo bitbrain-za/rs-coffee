@@ -50,7 +50,7 @@ impl SwitchesState {
     fn update(&self, brew: SwitchState, hot_water: SwitchState, steam: SwitchState) -> Self {
         match (brew, hot_water, steam) {
             (SwitchState::Active, SwitchState::Active, SwitchState::Active) => Self::AutoTune,
-            (SwitchState::Active, SwitchState::Active, SwitchState::Released) => Self::AutoTune,
+            (SwitchState::Active, SwitchState::Active, SwitchState::Released) => Self::Backflush,
             (SwitchState::Active, _, _) => Self::Brew,
             (_, SwitchState::Active, _) => Self::HotWater,
             (_, _, SwitchState::Active) => Self::Steam,

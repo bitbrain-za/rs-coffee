@@ -4,11 +4,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Device {
-    temperature: Temperature,
-    pressure: Bar,
-    weight: Grams,
-    ambient: Temperature,
-    power: Watts,
+    pub temperature: Temperature,
+    pub pressure: Bar,
+    pub weight: Grams,
+    pub ambient: Temperature,
+    pub power: Watts,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

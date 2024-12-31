@@ -5,6 +5,7 @@ use crate::gpio::{
     switch::Switches,
 };
 use crate::indicator::ring::{Ring, State as IndicatorState};
+use crate::schemas::status::Device as DeviceReport;
 use crate::sensors::pressure::SeeedWaterPressureSensor;
 use crate::sensors::pt100::Pt100;
 use crate::sensors::scale::{Interface as LoadCell, Scale};
@@ -32,8 +33,9 @@ use std::thread;
 
 pub type Element = Pwm<'static, Gpio1>;
 
+#[derive(Clone)]
 pub struct Board {
-    indicator: Ring,
+    pub indicator: Ring,
     pub temperature: Arc<RwLock<f32>>,
     pub scale: LoadCell,
     pub switches: Switches,
@@ -238,27 +240,14 @@ impl Board {
 
         Ok(())
     }
-}
 
-pub enum Action {
-    SetIndicator(IndicatorState),
-    Panic,
-    Error,
-}
-
-impl Action {
-    pub fn execute(&self, board: Arc<Mutex<Board>>) {
-        let board = board.lock().unwrap();
-        match self {
-            Action::SetIndicator(state) => {
-                board.indicator.set_state(*state);
-            }
-            Action::Error => {
-                board.indicator.set_state(IndicatorState::Error);
-            }
-            Action::Panic => {
-                board.indicator.set_state(IndicatorState::Panic);
-            }
+    pub fn generate_report(&self) -> DeviceReport {
+        DeviceReport {
+            temperature: *self.temperature.read().unwrap(),
+            pressure: *self.pressure.read().unwrap(),
+            weight: *self.scale.weight.read().unwrap(),
+            ambient: config::STAND_IN_AMBIENT,
+            power: 0.0,
         }
     }
 }

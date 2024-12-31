@@ -1,7 +1,5 @@
 use crate::app_state::System;
 use crate::config::Mqtt as config;
-use crate::schemas::status::StatusReport;
-use core::time::Duration;
 use esp_idf_svc::mqtt::client::*;
 
 pub fn mqtt_create(url: &str, client_id: &str, system: &System) {
@@ -18,16 +16,15 @@ pub fn mqtt_create(url: &str, client_id: &str, system: &System) {
     )
     .unwrap();
     std::thread::spawn(move || loop {
-        let status = StatusReport::new(&system);
-        let payload = status.to_json();
+        let report = system.generate_report().to_json();
 
         let _ = mqtt_client.enqueue(
             config::STATUS_TOPIC,
             QoS::AtMostOnce,
             false,
-            payload.as_bytes(),
+            report.as_bytes(),
         );
 
-        std::thread::sleep(Duration::from_secs(2));
+        std::thread::sleep(config::REPORT_INTERVAL);
     });
 }

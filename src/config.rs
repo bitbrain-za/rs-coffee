@@ -10,7 +10,6 @@ pub const ADC_SAMPLES: usize = 100;
 
 pub const BOILER_PWM_PERIOD: Duration = Duration::from_millis(1000);
 pub const PUMP_PWM_PERIOD: Duration = Duration::from_millis(100);
-pub const OUTPUT_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub const BACKFLUSH_ON_TIME: Duration = Duration::from_secs(10);
 pub const BACKFLUSH_OFF_TIME: Duration = Duration::from_secs(10);
@@ -47,6 +46,7 @@ impl Shots {
 
 pub struct Mqtt {}
 impl Mqtt {
+    pub const REPORT_INTERVAL: Duration = Duration::from_secs(2);
     pub const STATUS_TOPIC: &'static str = "dummy/status";
     pub const EVENT_TOPIC: &'static str = "dummy/command";
 }

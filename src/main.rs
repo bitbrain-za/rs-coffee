@@ -1,6 +1,6 @@
 // [ ] Go through all the "expects" and change them to put the system into an error/panic state
 // [ ] Remove this later, just silence warnings while we're doing large scale writing
-#![allow(dead_code)]
+// #![allow(dead_code)]
 mod api;
 mod app_state;
 mod board;
@@ -17,7 +17,6 @@ mod types;
 use crate::components::boiler::Message as BoilerMessage;
 use anyhow::Result;
 use app_state::System;
-use board::Action;
 use dotenv_codegen::dotenv;
 use gpio::switch::SwitchesState;
 use state_machines::operational_fsm::OperationalState;
@@ -97,7 +96,7 @@ fn main() -> Result<()> {
     let mqtt_client_id = dotenv!("MQTT_CLIENT_ID");
     api::mqtt::mqtt_create(&mqtt_url, mqtt_client_id, &system);
 
-    let temperature_probe = system.board.lock().unwrap().temperature.clone();
+    let temperature_probe = system.board.temperature.clone();
     let boiler = components::boiler::Boiler::new(element, temperature_probe.clone());
 
     simulate_auto_tuner(temperature_probe.clone(), boiler.clone());
@@ -115,10 +114,11 @@ fn main() -> Result<()> {
         .transition(SystemTransition::Idle)
         .expect("Invalid transition :(");
 
-    let weight = system.board.lock().unwrap().scale.weight.clone();
-    let switches = system.board.lock().unwrap().switches.clone();
-    let pressure_probe = system.board.lock().unwrap().pressure.clone();
-    let pump = system.board.lock().unwrap().pump.clone();
+    let weight = system.board.scale.weight.clone();
+    let switches = system.board.switches.clone();
+    let pressure_probe = system.board.pressure.clone();
+    let pump = system.board.pump.clone();
+    let board = system.board.clone();
 
     let mut previous_switch_state = SwitchesState::Idle;
 
@@ -136,9 +136,7 @@ fn main() -> Result<()> {
                         log::debug!("Boiler temperature: {}", boiler_temperature);
                         log::debug!("Pump pressure: {}", pump_pressure);
                         log::debug!("Weight: {}", *weight.read().unwrap());
-                        let _ = system.execute_board_action(Action::SetIndicator(
-                            indicator::ring::State::Idle,
-                        ));
+                        board.indicator.set_state(indicator::ring::State::Idle);
                     }
                     OperationalState::Brewing => {
                         let indicator = indicator::ring::State::Temperature {
@@ -146,7 +144,7 @@ fn main() -> Result<()> {
                             max: 100.0,
                             level: boiler_temperature,
                         };
-                        let _ = system.execute_board_action(Action::SetIndicator(indicator));
+                        board.indicator.set_state(indicator);
                     }
                     OperationalState::Steaming => {
                         let indicator = indicator::ring::State::Temperature {
@@ -154,7 +152,7 @@ fn main() -> Result<()> {
                             max: 140.0,
                             level: boiler_temperature,
                         };
-                        let _ = system.execute_board_action(Action::SetIndicator(indicator));
+                        board.indicator.set_state(indicator);
                     }
                     OperationalState::AutoTuneInit => {
                         log::info!("Auto-tuning boiler");
@@ -224,7 +222,7 @@ fn main() -> Result<()> {
         let current_state = switches.get_state();
         if previous_switch_state != current_state {
             if previous_switch_state == SwitchesState::Brew {
-                system.board.lock().unwrap().scale.stop_brewing();
+                system.board.scale.stop_brewing();
             }
             match current_state {
                 SwitchesState::Idle => {
@@ -234,7 +232,7 @@ fn main() -> Result<()> {
                 }
                 SwitchesState::Brew => {
                     log::info!("Switched to brew");
-                    system.board.lock().unwrap().scale.start_brew();
+                    system.board.scale.start_brew();
                     pump.turn_on(Some(Duration::from_secs(5)));
                     let mode = components::boiler::Mode::Mpc { target: 94.0 };
                     boiler.send_message(BoilerMessage::SetMode(mode));
