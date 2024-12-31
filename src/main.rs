@@ -94,7 +94,12 @@ fn main() -> Result<()> {
     let mqtt_port: u16 = dotenv!("MQTT_PORT").parse().expect("Invalid MQTT Port");
     let mqtt_url = format!("mqtt://{}:{}", mqtt_url, mqtt_port);
     let mqtt_client_id = dotenv!("MQTT_CLIENT_ID");
-    api::mqtt::mqtt_create(&mqtt_url, mqtt_client_id, &system);
+    api::mqtt::mqtt_create(
+        &mqtt_url,
+        mqtt_client_id,
+        &system,
+        Some(config::EVENT_LEVEL),
+    );
 
     let temperature_probe = system.board.temperature.clone();
     let boiler = components::boiler::Boiler::new(element, temperature_probe.clone());
@@ -107,6 +112,8 @@ fn main() -> Result<()> {
         temperature_probe.clone(),
     );
 
+    info!(system, "Starting up");
+
     system
         .system_state
         .lock()
@@ -114,7 +121,7 @@ fn main() -> Result<()> {
         .transition(SystemTransition::Idle)
         .expect("Invalid transition :(");
 
-    let weight = system.board.scale.weight.clone();
+    let scale = system.board.scale.clone();
     let switches = system.board.switches.clone();
     let pressure_probe = system.board.pressure.clone();
     let pump = system.board.pump.clone();
@@ -135,7 +142,8 @@ fn main() -> Result<()> {
                     OperationalState::Idle => {
                         log::debug!("Boiler temperature: {}", boiler_temperature);
                         log::debug!("Pump pressure: {}", pump_pressure);
-                        log::debug!("Weight: {}", *weight.read().unwrap());
+                        log::debug!("Weight: {}", scale.get_weight());
+                        log::debug!("Flow: {}", scale.get_flow());
                         board.indicator.set_state(indicator::ring::State::Idle);
                     }
                     OperationalState::Brewing => {
@@ -156,6 +164,7 @@ fn main() -> Result<()> {
                     }
                     OperationalState::AutoTuneInit => {
                         log::info!("Auto-tuning boiler");
+                        info!(system, "Auto-tuning boiler");
 
                         boiler.send_message(BoilerMessage::SetMode(components::boiler::Mode::Off));
 
@@ -183,6 +192,7 @@ fn main() -> Result<()> {
                             if let Some(res) = auto_tuner.run()? {
                                 log::info!("Simulation completed");
                                 log::info!("Results: {:?}", res);
+                                info!(system, "Simulation Results: {:?}", res);
 
                                 let initial_boiler = auto_tuner.get_model_boiler_temperature();
 
@@ -209,9 +219,11 @@ fn main() -> Result<()> {
             }
             (SystemState::Error(message), _) => {
                 log::error!("System is in an error state: {}", message);
+                error!(system, "System is in an error state: {}", message);
             }
             (SystemState::Panic(message), _) => {
                 log::error!("System is in a panic state: {}", message);
+                panic!(system, "System is in a panic state: {}", message);
             }
 
             (_, _) => {
@@ -227,10 +239,12 @@ fn main() -> Result<()> {
             match current_state {
                 SwitchesState::Idle => {
                     log::info!("Switched to idle");
+                    info!(system, "Switched to idle");
                     boiler.send_message(BoilerMessage::SetMode(components::boiler::Mode::Off));
                     pump.turn_off();
                 }
                 SwitchesState::Brew => {
+                    info!(system, "Switched to brew");
                     log::info!("Switched to brew");
                     system.board.scale.start_brew();
                     pump.turn_on(Some(Duration::from_secs(5)));
@@ -245,6 +259,7 @@ fn main() -> Result<()> {
                 }
                 SwitchesState::Steam => {
                     log::info!("Switched to steam");
+                    info!(system, "Switched to steam");
                     let mode = components::boiler::Mode::BangBang {
                         upper_threshold: 140.0,
                         lower_threshold: 120.0,
@@ -254,17 +269,20 @@ fn main() -> Result<()> {
                 }
                 SwitchesState::Backflush => {
                     log::info!("Switched to backflush");
+                    info!(system, "Switched to backflush");
                     let mode = components::boiler::Mode::Mpc { target: 70.0 };
                     boiler.send_message(BoilerMessage::SetMode(mode));
                     pump.backflush();
                 }
                 SwitchesState::AutoTune => {
                     log::info!("Switched to auto-tune");
+                    info!(system, "Switched to auto-tune");
                     pump.turn_off();
                     if let Err(e) = system.operational_state.lock().unwrap().transition(
                         crate::state_machines::operational_fsm::Transitions::StartAutoTune,
                     ) {
-                        log::error!("Failed to transition to auto-tune: {:?}", e);
+                        log::warn!("Failed to transition to auto-tune: {:?}", e);
+                        warn!(system, "Failed to transition to auto-tune: {:?}", e);
                     }
                 }
             }

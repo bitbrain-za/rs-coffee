@@ -1,6 +1,9 @@
 use crate::types::*;
 use std::time::Duration;
 
+pub const EVENT_LEVEL: crate::schemas::event::LevelFilter =
+    crate::schemas::event::LevelFilter::Debug;
+
 pub const LOAD_SENSOR_SCALING: f32 = 4.761905;
 pub const SCALE_POLLING_RATE_MS: Duration = Duration::from_millis(10 * 10);
 pub const SCALE_SAMPLES: usize = 5;
@@ -48,5 +51,5 @@ pub struct Mqtt {}
 impl Mqtt {
     pub const REPORT_INTERVAL: Duration = Duration::from_secs(2);
     pub const STATUS_TOPIC: &'static str = "dummy/status";
-    pub const EVENT_TOPIC: &'static str = "dummy/command";
+    pub const EVENT_TOPIC: &'static str = "dummy/event";
 }

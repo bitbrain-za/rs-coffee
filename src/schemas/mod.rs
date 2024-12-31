@@ -1,5 +1,6 @@
 pub mod drink;
 mod error;
+pub mod event;
 pub mod postinfusion;
 pub mod preinfusion;
 pub mod shot;
