@@ -189,6 +189,28 @@
             "top": 153.6,
             "left": -336.6,
             "attrs": {}
+        },
+        {
+            "type": "board-ds18b20",
+            "id": "temp1",
+            "top": 136.82,
+            "left": -222.03,
+            "rotate": 270,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc2",
+            "top": 125.56,
+            "left": -182.4,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd8",
+            "top": 172.8,
+            "left": -183,
+            "attrs": {}
         }
     ],
     "connections": [
@@ -476,6 +498,31 @@
             [
                 "v-115.2",
                 "h38.4"
+            ]
+        ],
+        [
+            "temp1:DQ",
+            "esp:16",
+            "green",
+            [
+                "h48",
+                "v-57.6"
+            ]
+        ],
+        [
+            "vcc2:VCC",
+            "temp1:VCC",
+            "red",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "gnd8:GND",
+            "temp1:GND",
+            "black",
+            [
+                "v0"
             ]
         ]
     ],

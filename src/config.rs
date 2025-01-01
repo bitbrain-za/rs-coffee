@@ -33,6 +33,8 @@ pub const AUTOTUNE_TARGET_TEMPERATURE: Temperature = 94.0;
 pub const STEADY_STATE_TEST_TIME: Duration = Duration::from_secs(600);
 #[cfg(feature = "simulate")]
 pub const TIME_DILATION_FACTOR: f32 = 0.01;
+#[cfg(not(feature = "simulate"))]
+pub const TIME_DILATION_FACTOR: f32 = 1.0;
 
 pub const MPC_SMOOTHING_FACTOR: f32 = 0.5;
 

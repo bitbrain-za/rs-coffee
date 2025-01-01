@@ -27,6 +27,7 @@ pub enum State {
     Busy,
     Panic,
     Error,
+    Heartbeat,
 }
 
 impl State {
@@ -67,6 +68,7 @@ impl State {
 
                 Box::new(progress)
             }
+            State::Heartbeat => Box::new(strip::Rainbow::new(1, None)),
             State::Off => Box::new(strip::Breathe::new(count, None, None)),
         }
     }
@@ -91,36 +93,33 @@ impl Ring {
         let mut led = Ws2812Esp32Rmt::new(rmt_channel, pin).expect("Failed to initialize LED ring");
         let (tx, rx) = channel::<State>();
 
-        std::thread::Builder::new()
-            .name("indicator".to_string())
-            .spawn(move || {
-                let mut active_state = State::Off;
-                let mut effect: Box<dyn EffectIterator> =
-                    Box::new(strip::Rainbow::new(count, None));
-                log::info!("Starting indicator thread");
-                loop {
-                    while let Ok(state) = rx.try_recv() {
-                        if state != active_state {
-                            effect = state.as_effect(count);
-                            active_state = state;
-                        }
+        std::thread::spawn(move || {
+            let mut active_state = State::Off;
+            let mut effect: Box<dyn EffectIterator> = Box::new(strip::Rainbow::new(count, None));
+            log::info!("Starting indicator thread");
+            loop {
+                while let Ok(state) = rx.try_recv() {
+                    if state != active_state {
+                        log::debug!("Setting indicator state: {:?}", state);
+                        effect = state.as_effect(count);
+                        active_state = state;
                     }
-
-                    let pixels: Vec<Rgb> = effect
-                        .next()
-                        .unwrap()
-                        .iter()
-                        .map(|i| Rgb {
-                            r: i.red,
-                            g: i.green,
-                            b: i.blue,
-                        })
-                        .collect();
-                    led.write(pixels).unwrap();
-                    std::thread::sleep(tickspeed);
                 }
-            })
-            .expect("Failed to spawn indicator thread");
+
+                let pixels: Vec<Rgb> = effect
+                    .next()
+                    .unwrap()
+                    .iter()
+                    .map(|i| Rgb {
+                        r: i.red,
+                        g: i.green,
+                        b: i.blue,
+                    })
+                    .collect();
+                led.write(pixels).unwrap();
+                std::thread::sleep(tickspeed);
+            }
+        });
 
         Ring { mailbox: tx }
     }

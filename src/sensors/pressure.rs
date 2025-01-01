@@ -45,9 +45,3 @@ impl PressureProbe for SeeedWaterPressureSensor {
         Ok((voltage / self.vcc - 0.1) / 0.75)
     }
 }
-
-impl SeeedWaterPressureSensor {
-    pub fn new() -> Self {
-        SeeedWaterPressureSensor::load_or_default()
-    }
-}

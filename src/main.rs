@@ -104,6 +104,7 @@ fn main() -> Result<()> {
     let temperature_probe = system.board.temperature.clone();
     let boiler = system.board.boiler.clone();
 
+    #[cfg(feature = "simulate")]
     simulate_auto_tuner(temperature_probe.clone(), boiler.clone());
 
     let mut loop_interval = Duration::from_millis(1000);

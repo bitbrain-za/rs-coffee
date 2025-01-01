@@ -21,7 +21,6 @@ pub struct Adc<
     pressure_probe: AdcChannelDriver<'a, P, N>,
     poll_interval: Duration,
     next_poll: Instant,
-    raw_to_vin_factor: f32,
     samples: Vec<(u16, u16)>,
     samples_to_average: usize,
     last_reading: (f32, f32),
@@ -40,32 +39,14 @@ where
         poll_interval: Duration,
         samples: usize,
     ) -> Self {
-        // [ ] these are probably wrong
-        const ADC_TOP: f32 = 4096.0;
-        const VREF: f32 = 1.1;
-        let vin_div_top = VREF / ADC_TOP;
-
         Self {
             temperature_probe: adc1,
             pressure_probe: adc2,
             poll_interval,
             next_poll: Instant::now(),
-            raw_to_vin_factor: vin_div_top,
             samples: Vec::new(),
             samples_to_average: samples,
             last_reading: (0.0, 0.0),
-        }
-    }
-
-    fn raw_to_voltage(&self, raw: f32, sim: AdcSimulation) -> f32 {
-        // raw as f32 * self.raw_to_vin_factor
-        match sim {
-            AdcSimulation::Temperature => {
-                let mut voltage = raw / 5090.0 * 2.71;
-                voltage += 1.884;
-                voltage
-            }
-            AdcSimulation::Pressure => raw * self.raw_to_vin_factor,
         }
     }
 
@@ -85,14 +66,10 @@ where
                 .fold((0, 0), |acc, (t, p)| (acc.0 + *t as u32, acc.1 + *p as u32));
             let average_temperature_sample = average_temperature as f32 / self.samples.len() as f32;
             let average_pressure_sample = average_pressure as f32 / self.samples.len() as f32;
-            let average_boiler_voltage =
-                self.raw_to_voltage(average_temperature_sample, AdcSimulation::Temperature);
-            let average_pressure_voltage =
-                self.raw_to_voltage(average_pressure_sample, AdcSimulation::Pressure);
 
             self.samples.clear();
 
-            Some((average_boiler_voltage, average_pressure_voltage))
+            Some((average_temperature_sample, average_pressure_sample))
         } else {
             None
         }

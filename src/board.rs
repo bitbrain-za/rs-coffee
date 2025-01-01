@@ -22,6 +22,7 @@ use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
 use esp_idf_svc::timer::EspTaskTimerService;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
+    nvs::EspDefaultNvsPartition,
     wifi::{AsyncWifi, EspWifi},
 };
 use std::sync::{Arc, Mutex, RwLock};
@@ -30,6 +31,7 @@ use std::thread;
 #[derive(Clone)]
 pub struct Board {
     pub indicator: Ring,
+    pub onboard_rgb: Ring,
     pub temperature: Arc<RwLock<f32>>,
     pub scale: LoadCell,
     pub switches: Switches,
@@ -51,8 +53,16 @@ impl Board {
             .transition(Transitions::StartingUpStage("Indicator Setup".to_string()))
             .expect("Failed to set operational state");
 
+        let onboard_led = Ring::new(
+            peripherals.rmt.channel0,
+            peripherals.pins.gpio48,
+            config::LED_REFRESH_INTERVAL,
+            1,
+        );
+        onboard_led.set_state(IndicatorState::Heartbeat);
+
         let led_pin = peripherals.pins.gpio21;
-        let channel = peripherals.rmt.channel0;
+        let channel = peripherals.rmt.channel1;
 
         let ring = Ring::new(
             channel,
@@ -69,9 +79,11 @@ impl Board {
         log::info!("Setting up wifi");
         let sys_loop = EspSystemEventLoop::take().expect("Unable to take sysloop");
         let timer_service = EspTaskTimerService::new().expect("Failed to create timer service");
+        let nvs = EspDefaultNvsPartition::take().expect("Failed to take nvs partition");
 
         let mut wifi = AsyncWifi::wrap(
-            EspWifi::new(peripherals.modem, sys_loop.clone(), None).expect("Failed to create wifi"),
+            EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))
+                .expect("Failed to create wifi"),
             sys_loop,
             timer_service,
         )
@@ -144,11 +156,11 @@ impl Board {
                         return;
                     }
                     if let Some((temperature, pressure)) = adc.read() {
-                        let degrees = match pt100.convert_voltage_to_degrees(temperature) {
+                        let degrees = match pt100.convert_voltage_to_degrees(temperature / 1000.0) {
                             Ok(degrees) => degrees,
                             Err(e) => {
                                 log::error!("Failed to convert voltage to degrees: {:?}", e);
-                                continue;
+                                999.0
                             }
                         };
                         #[cfg(not(feature = "simulate"))]
@@ -160,14 +172,15 @@ impl Board {
                             let _ = degrees;
                         }
                         use crate::sensors::traits::PressureProbe;
-                        let pressure =
-                            match seed_pressure_probe.convert_voltage_to_pressure(pressure) {
-                                Ok(pressure) => pressure,
-                                Err(e) => {
-                                    log::error!("Failed to convert voltage to pressure: {:?}", e);
-                                    continue;
-                                }
-                            };
+                        let pressure = match seed_pressure_probe
+                            .convert_voltage_to_pressure(pressure / 1000.0)
+                        {
+                            Ok(pressure) => pressure,
+                            Err(e) => {
+                                log::error!("Failed to convert voltage to pressure: {:?}", e);
+                                continue;
+                            }
+                        };
                         *pressure_probe_clone.write().unwrap() = pressure;
                     }
 
@@ -194,6 +207,7 @@ impl Board {
 
         Board {
             indicator: ring,
+            onboard_rgb: onboard_led,
             temperature,
             scale: loadcell,
             switches,
