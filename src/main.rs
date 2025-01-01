@@ -19,13 +19,13 @@ use anyhow::Result;
 use app_state::System;
 use dotenv_codegen::dotenv;
 use gpio::switch::SwitchesState;
-use sensors::ambient;
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+#[cfg(feature = "simulate")]
 const SIMULATE_AUTO_TUNE: bool = false;
 #[cfg(feature = "simulate")]
 fn simulate_auto_tuner(
@@ -113,6 +113,7 @@ fn main() -> Result<()> {
     let mut auto_tuner = models::auto_tune::HeuristicAutoTuner::new(
         Duration::from_millis(1000),
         temperature_probe.clone(),
+        ambient_probe.clone(),
     );
 
     info!(system, "Starting up");
@@ -189,6 +190,7 @@ fn main() -> Result<()> {
                         auto_tuner = models::auto_tune::HeuristicAutoTuner::new(
                             Duration::from_millis(1000),
                             temperature_probe.clone(),
+                            ambient_probe.clone(),
                         );
                     }
                     OperationalState::AutoTuning => {

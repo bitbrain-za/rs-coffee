@@ -22,10 +22,7 @@ pub const PT_100_CALIBRATION_FACTOR: f32 = 2.209;
 pub const LED_COUNT: usize = 32;
 pub const LED_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
 
-pub const _IDLE_TEMPERATURE: Temperature = 60.0;
 pub const BOILER_POWER: Watts = 2000.0;
-pub const INITIAL_TEMPERATURE: Temperature = 25.0;
-pub const STAND_IN_AMBIENT: Temperature = 25.0;
 
 pub const AUTOTUNE_MAX_POWER: Watts = 1000.0;
 pub const AUTOTUNE_STEADY_STATE_POWER: Watts = AUTOTUNE_MAX_POWER * 0.5;

@@ -15,13 +15,20 @@ pub struct AmbientSensor {
 
 impl AmbientSensor {
     pub fn new(one_wire_pin: impl Peripheral<P = impl OutputPin + InputPin> + 'static) -> Self {
-        let temperature_probe = Arc::new(RwLock::new(Temperature::default()));
+        const GUESS_AT_AMBIENT_TEMP: Temperature = 25.0;
+        let temperature_probe = Arc::new(RwLock::new(GUESS_AT_AMBIENT_TEMP));
         let temperature_probe_clone = temperature_probe.clone();
+
         let mut delay = Delay::default();
         let one_wire_pin = PinDriver::input_output_od(one_wire_pin).unwrap();
         let mut one_wire_bus = OneWire::new(one_wire_pin).unwrap();
 
         std::thread::spawn(move || {
+            #[cfg(feature = "simulate")]
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                *temperature_probe_clone.write().unwrap() = GUESS_AT_AMBIENT_TEMP;
+            }
             for device_address in one_wire_bus.devices(false, &mut delay) {
                 match device_address {
                     Ok(device_address) => {

@@ -139,7 +139,8 @@ enum ElementControlOption {
 pub struct HeuristicAutoTuner {
     state: HeuristicAutoTunerState,
     sample_time: Duration,
-    ambient_temperature: Option<Temperature>,
+    // ambient_temperature: Option<Temperature>,
+    ambient_probe: Arc<RwLock<Temperature>>,
     results: Option<BoilerModelParameters>,
     ambient_measurement: AmbientTest,
     current_power: Watts,
@@ -686,11 +687,15 @@ impl SteadyStateTest {
 }
 
 impl HeuristicAutoTuner {
-    pub fn new(sample_time: Duration, temperature_probe: Arc<RwLock<Temperature>>) -> Self {
+    pub fn new(
+        sample_time: Duration,
+        temperature_probe: Arc<RwLock<Temperature>>,
+        ambient_probe: Arc<RwLock<Temperature>>,
+    ) -> Self {
         Self {
             sample_time,
             state: HeuristicAutoTunerState::default(),
-            ambient_temperature: None,
+            ambient_probe,
             results: None,
             ambient_measurement: AmbientTest::default(),
             current_power: 0.0,
@@ -734,7 +739,6 @@ impl HeuristicAutoTuner {
     }
 
     fn _set_element_mpc(&mut self, mpc: BoilerModelParameters) {
-        let ambient_temperature = self.ambient_temperature.unwrap_or(config::STAND_IN_AMBIENT);
         self.element_power = ElementControlOption::Locked;
         let current_temperature = self.get_probe();
 
@@ -742,7 +746,6 @@ impl HeuristicAutoTuner {
             let message = ElementMessage::UpdateParameters {
                 parameters: mpc,
                 initial_probe_temperature: current_temperature,
-                initial_ambient_temperature: ambient_temperature,
                 initial_boiler_temperature: self.modeled_temperature,
             };
             boiler.send_message(message);
@@ -828,6 +831,7 @@ impl HeuristicAutoTuner {
         Ok(())
     }
 
+    // [ ] pull this out, we have an ambient probe
     fn handle_ambient_test(
         &mut self,
         current_temperature: Temperature,
@@ -836,7 +840,7 @@ impl HeuristicAutoTuner {
             match self.ambient_measurement.sample(self.get_probe()) {
                 AmbientMeasurementState::Done(ambient_temperature) => {
                     self.set_percentage_complete(9.0);
-                    self.ambient_temperature = Some(ambient_temperature);
+                    // self.ambient_temperature = Some(ambient_temperature);
                     log::debug!("Ambient Temperature = {}", ambient_temperature);
 
                     log::debug!("Measuring Heatup");
@@ -869,10 +873,11 @@ impl HeuristicAutoTuner {
         if let HeuristicAutoTunerState::MeasureHeatingUp(ref mut test) = self.state {
             match test.measure(current_temperature) {
                 HeatupTestState::Done(mut heatup_results) => {
-                    let (estimated_temperature, _mpc) = heatup_results
-                        .estimate_values_from_heatup(self.ambient_temperature.unwrap())?;
+                    let ambient_temperature = *self.ambient_probe.read().unwrap();
+                    let (estimated_temperature, _mpc) =
+                        heatup_results.estimate_values_from_heatup(ambient_temperature)?;
                     let mut ambient_transfer_test =
-                        SteadyStateTest::new(heatup_results, self.ambient_temperature.unwrap())?;
+                        SteadyStateTest::new(heatup_results, ambient_temperature)?;
                     self.current_power = 0.0;
                     ambient_transfer_test.start(
                         config::STEADY_STATE_TEST_TIME,
@@ -912,8 +917,9 @@ impl HeuristicAutoTuner {
                     log::debug!("Power: {}", test_power);
 
                     log::info!("Estimating values from thermal transfer");
-                    let results = test
-                        .estimate_values_from_thermal_transfer(self.ambient_temperature.unwrap())?;
+                    let results = test.estimate_values_from_thermal_transfer(
+                        *self.ambient_probe.read().unwrap(),
+                    )?;
 
                     self.results = Some(results);
                     self.print_results();

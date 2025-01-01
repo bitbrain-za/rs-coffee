@@ -1,6 +1,7 @@
 use crate::config;
 use crate::gpio::pwm::PwmBuilder;
 use crate::models::boiler::{BoilerModel, BoilerModelParameters};
+use crate::types::Temperature;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::OutputPin;
 use std::sync::{
@@ -46,7 +47,6 @@ pub enum Message {
     UpdateParameters {
         parameters: BoilerModelParameters,
         initial_probe_temperature: f32,
-        initial_ambient_temperature: f32,
         initial_boiler_temperature: f32,
     },
 }
@@ -60,14 +60,12 @@ impl Message {
             Message::UpdateParameters {
                 parameters,
                 initial_probe_temperature,
-                initial_ambient_temperature,
                 initial_boiler_temperature,
             } => {
                 boiler.update_parameters(
                     parameters,
                     initial_probe_temperature,
                     initial_boiler_temperature,
-                    initial_ambient_temperature,
                 );
             }
         }
@@ -86,11 +84,15 @@ impl Boiler {
         self.mailbox.send(message).unwrap();
     }
 
-    pub fn new<PE>(temperature_probe: Arc<RwLock<f32>>, element_pin: PE) -> Self
+    pub fn new<PE>(
+        ambient_probe: Arc<RwLock<Temperature>>,
+        temperature_probe: Arc<RwLock<Temperature>>,
+        element_pin: PE,
+    ) -> Self
     where
         PE: OutputPin,
     {
-        let model = BoilerModel::new(Some(config::STAND_IN_AMBIENT));
+        let model = BoilerModel::new(ambient_probe.clone(), None);
         let (mailbox, rx) = channel::<Message>();
         let mut element = PwmBuilder::new()
             .with_interval(config::BOILER_PWM_PERIOD)
@@ -148,7 +150,7 @@ impl Boiler {
                             let probe_temperature = *temperature_probe.read().unwrap();
                             let power = my_boiler_model.control(
                                 probe_temperature,
-                                config::STAND_IN_AMBIENT,
+                                *ambient_probe.read().unwrap(),
                                 target,
                                 Duration::from_millis(UPDATE_INTERVAL),
                             );

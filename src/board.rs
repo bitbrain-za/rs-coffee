@@ -197,7 +197,11 @@ impl Board {
             .expect("Failed to set operational state");
         log::info!("Setting up outputs");
 
-        let boiler = Boiler::new(temperature.clone(), peripherals.pins.gpio1);
+        let boiler = Boiler::new(
+            ambient_probe.temperature.clone(),
+            temperature.clone(),
+            peripherals.pins.gpio1,
+        );
         let pump = Pump::new(
             peripherals.pins.gpio42,
             peripherals.pins.gpio2,
@@ -253,7 +257,7 @@ impl Board {
             temperature: *self.temperature.read().unwrap(),
             pressure: *self.pressure.read().unwrap(),
             weight: *self.scale.weight.read().unwrap(),
-            ambient: config::STAND_IN_AMBIENT,
+            ambient: *self.ambient_temperature.read().unwrap(),
             power: 0.0,
         }
     }

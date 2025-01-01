@@ -2,6 +2,7 @@ use crate::config;
 use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
 use crate::types::{Temperature, Watts};
 use serde::{Deserialize, Serialize};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq)]
@@ -103,23 +104,27 @@ pub struct BoilerModel {
     // process variables
     pub probe_temperature: Temperature,
     boiler_temperature: Temperature,
-    pub ambient_temperature: Temperature,
+    ambient_probe: Arc<RwLock<Temperature>>,
 
     power: Watts,
     smoothing_factor: f32,
 }
 
 impl BoilerModel {
-    pub fn new(initial_temperature: Option<Temperature>) -> Self {
+    pub fn new(
+        ambient_probe: Arc<RwLock<Temperature>>,
+        initial_temperature: Option<Temperature>,
+    ) -> Self {
+        let ambient_temperature = *ambient_probe.read().unwrap();
         Self {
             max_power: config::BOILER_POWER,
             parameters: BoilerModelParameters::load_or_default(),
 
             flow_rate_kg_per_sec: 0.0,
 
-            probe_temperature: initial_temperature.unwrap_or(config::INITIAL_TEMPERATURE),
-            boiler_temperature: initial_temperature.unwrap_or(config::INITIAL_TEMPERATURE),
-            ambient_temperature: initial_temperature.unwrap_or(config::INITIAL_TEMPERATURE),
+            probe_temperature: initial_temperature.unwrap_or(ambient_temperature),
+            boiler_temperature: initial_temperature.unwrap_or(ambient_temperature),
+            ambient_probe,
 
             power: 0.0,
             smoothing_factor: config::MPC_SMOOTHING_FACTOR,
@@ -131,12 +136,10 @@ impl BoilerModel {
         parameters: BoilerModelParameters,
         probe_temperature: Temperature,
         boiler_temperature: Temperature,
-        ambient_temperature: Temperature,
     ) {
         self.parameters = parameters;
-        // self.parameters.save().unwrap();
+        self.parameters.save().unwrap();
 
-        self.ambient_temperature = ambient_temperature;
         self.boiler_temperature = boiler_temperature;
         self.probe_temperature = probe_temperature;
     }
@@ -167,7 +170,7 @@ impl BoilerModel {
             power,
             self.boiler_temperature,
             self.probe_temperature,
-            self.ambient_temperature,
+            *self.ambient_probe.read().unwrap(),
             self.flow_rate_kg_per_sec,
             dt,
         );

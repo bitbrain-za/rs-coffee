@@ -56,7 +56,6 @@ dotenv_codegen = "0.15.0"
 embedded-hal = "1.0.0"
 one-wire-bus = { git = "https://github.com/daniel-larsen/one-wire-bus.git" }
 ds18b20 = { git = "https://github.com/elwerene/ds18b20.git"}
-# onewire = { git = "https://github.com/andresv/onewire.git"}
 
 [build-dependencies]
 embuild = "0.32.0"
