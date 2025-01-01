@@ -33,6 +33,7 @@ pub struct Board {
     pub indicator: Ring,
     pub onboard_rgb: Ring,
     pub temperature: Arc<RwLock<f32>>,
+    pub ambient_temperature: Arc<RwLock<f32>>,
     pub scale: LoadCell,
     pub switches: Switches,
     pub pressure: Arc<RwLock<f32>>,
@@ -75,6 +76,8 @@ impl Board {
         operational_state
             .transition(Transitions::StartingUpStage("Input Setup".to_string()))
             .expect("Failed to set operational state");
+
+        let ambient_probe = crate::sensors::ambient::AmbientSensor::new(peripherals.pins.gpio3);
 
         log::info!("Setting up wifi");
         let sys_loop = EspSystemEventLoop::take().expect("Unable to take sysloop");
@@ -209,6 +212,7 @@ impl Board {
             indicator: ring,
             onboard_rgb: onboard_led,
             temperature,
+            ambient_temperature: ambient_probe.temperature,
             scale: loadcell,
             switches,
             pump,

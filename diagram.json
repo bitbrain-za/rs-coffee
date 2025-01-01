@@ -193,24 +193,33 @@
         {
             "type": "board-ds18b20",
             "id": "temp1",
-            "top": 136.82,
-            "left": -222.03,
+            "top": 242.42,
+            "left": -375.63,
             "rotate": 270,
             "attrs": {}
         },
         {
             "type": "wokwi-vcc",
             "id": "vcc2",
-            "top": 125.56,
-            "left": -182.4,
+            "top": 192.76,
+            "left": -326.4,
             "attrs": {}
         },
         {
             "type": "wokwi-gnd",
             "id": "gnd8",
-            "top": 172.8,
-            "left": -183,
+            "top": 307.2,
+            "left": -336.6,
             "attrs": {}
+        },
+        {
+            "type": "wokwi-resistor",
+            "id": "r1",
+            "top": 224.75,
+            "left": -297.6,
+            "attrs": {
+                "value": "4700"
+            }
         }
     ],
     "connections": [
@@ -501,15 +510,6 @@
             ]
         ],
         [
-            "temp1:DQ",
-            "esp:16",
-            "green",
-            [
-                "h48",
-                "v-57.6"
-            ]
-        ],
-        [
             "vcc2:VCC",
             "temp1:VCC",
             "red",
@@ -523,6 +523,31 @@
             "black",
             [
                 "v0"
+            ]
+        ],
+        [
+            "vcc2:VCC",
+            "r1:1",
+            "red",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "r1:2",
+            "temp1:DQ",
+            "green",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "esp:3",
+            "r1:2",
+            "green",
+            [
+                "v0",
+                "h-240.05"
             ]
         ]
     ],

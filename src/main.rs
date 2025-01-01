@@ -19,6 +19,7 @@ use anyhow::Result;
 use app_state::System;
 use dotenv_codegen::dotenv;
 use gpio::switch::SwitchesState;
+use sensors::ambient;
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
 use std::sync::{Arc, Mutex, RwLock};
@@ -102,6 +103,7 @@ fn main() -> Result<()> {
     );
 
     let temperature_probe = system.board.temperature.clone();
+    let ambient_probe = system.board.ambient_temperature.clone();
     let boiler = system.board.boiler.clone();
 
     #[cfg(feature = "simulate")]
@@ -138,6 +140,7 @@ fn main() -> Result<()> {
             (SystemState::Healthy, operational_state) => {
                 let boiler_temperature = *temperature_probe.read().unwrap();
                 let pump_pressure = *pressure_probe.read().unwrap();
+                let ambient_temperature = *ambient_probe.read().unwrap();
 
                 match operational_state {
                     OperationalState::Idle => {
@@ -145,6 +148,7 @@ fn main() -> Result<()> {
                         log::debug!("Pump pressure: {}", pump_pressure);
                         log::debug!("Weight: {}", scale.get_weight());
                         log::debug!("Flow: {}", scale.get_flow());
+                        log::debug!("Ambient temperature: {}", ambient_temperature);
                         board.indicator.set_state(indicator::ring::State::Idle);
                     }
                     OperationalState::Brewing => {
