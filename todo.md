@@ -1,18 +1,17 @@
+ # 0.0
+ - [ ] works same as normal but with temperature control and auto-tuning
  - [ ] Review timer implementation (https://docs.esp-rs.org/esp-idf-svc/esp_idf_svc/timer/index.html)
- - [X] Tidy up the state stuff
- - [X] Tidy up the board stuff
- - [X] Add periodic status reporting
- - [ ] Add Availability
  - [ ] Runtime WIFI config
+ - [ ] Move ADC to I2C ADC (ADS1115)
+-  [ ] Review config 
+ - [ ] Level Sensing
+
+ 
+ # 0.8
+ - [ ] Add Availability
  - [ ] OTA
- - [X] consolidate the types
  - [ ] Fix up all the state machines/system state/operation state
  - [ ] Maybe an observer patter?
- - [X] Try out mspc channels again
- - [ ] Move ADC to I2C ADC (ADS1115)
- - [ ] Implement Level Sensing
  - [ ] SD Card - Wait for next release: https://github.com/esp-rs/esp-idf-svc/issues/467
  - [ ] Display
  - [ ] Add endpoint to set loadcell scaling
- - [ ] Review config 
- - [ ] Move element into boiler properly, create rwlock to monitor power

@@ -81,7 +81,7 @@ fn main() -> Result<()> {
 
     log::info!("Starting up");
 
-    let (system, element) = System::new();
+    let system = System::new();
     let api_state = app_state::ApiData {
         echo_data: "Init".to_string(),
         drink: None,
@@ -102,7 +102,7 @@ fn main() -> Result<()> {
     );
 
     let temperature_probe = system.board.temperature.clone();
-    let boiler = components::boiler::Boiler::new(element, temperature_probe.clone());
+    let boiler = system.board.boiler.clone();
 
     simulate_auto_tuner(temperature_probe.clone(), boiler.clone());
 

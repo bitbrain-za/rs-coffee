@@ -22,11 +22,26 @@ pub enum Message {
 pub type Mailbox = Sender<Message>;
 
 #[derive(Clone)]
-pub struct Interface {
+pub struct Pump {
     mailbox: Mailbox,
 }
 
-impl Interface {
+impl Pump {
+    pub fn new<PD: OutputPin, PE: OutputPin>(
+        pump_pin: PD,
+        solenoid_pin: PE,
+        pressure_probe: Arc<RwLock<Bar>>,
+        weight_probe: Arc<RwLock<Grams>>,
+        interval: Duration,
+    ) -> Self {
+        PumpInternal::start(
+            pump_pin,
+            solenoid_pin,
+            pressure_probe,
+            weight_probe,
+            interval,
+        )
+    }
     pub fn turn_on(&self, duration: Option<Duration>) {
         if let Some(duration) = duration {
             self.mailbox.send(Message::OnForTime(duration)).unwrap();
@@ -60,7 +75,7 @@ enum State {
     Backflush,
 }
 
-pub struct Pump<PD: OutputPin, PE: OutputPin> {
+struct PumpInternal<PD: OutputPin, PE: OutputPin> {
     pwm: Pwm<'static, PD>,
     solenoid: PinDriver<'static, PE, Output>,
     pressure_probe: Arc<RwLock<Bar>>,
@@ -70,22 +85,22 @@ pub struct Pump<PD: OutputPin, PE: OutputPin> {
     backflush_in_off_cycle: bool,
 }
 
-impl<PD, PE> Pump<PD, PE>
+impl<PD, PE> PumpInternal<PD, PE>
 where
     PD: OutputPin,
     PE: OutputPin,
 {
-    pub fn start(
+    fn start(
         pump_pin: PD,
         solenoid_pin: PE,
         pressure_probe: Arc<RwLock<Bar>>,
         weight_probe: Arc<RwLock<Grams>>,
         interval: Duration,
-    ) -> Interface {
+    ) -> Pump {
         let (tx, rx) = channel();
 
         std::thread::spawn(move || {
-            let mut my_pump = Pump {
+            let mut my_pump = PumpInternal {
                 pwm: Pwm::new(pump_pin, Duration::from_millis(100), None),
                 solenoid: PinDriver::output(solenoid_pin).expect("Failed to create relay"),
                 pressure_probe,
@@ -137,7 +152,7 @@ where
                 std::thread::sleep(next_tick);
             }
         });
-        Interface { mailbox: tx }
+        Pump { mailbox: tx }
     }
 
     fn set_pressure(&mut self, pressure: Bar) {

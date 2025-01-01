@@ -1,4 +1,4 @@
-use crate::board::{self, Board};
+use crate::board::Board;
 use crate::schemas::event::EventBuffer;
 use crate::schemas::status::StatusReport;
 use crate::state_machines::{
@@ -24,24 +24,20 @@ pub struct System {
 }
 
 impl System {
-    pub fn new() -> (Self, board::Element) {
+    pub fn new() -> Self {
         let operational_state = Arc::new(Mutex::new(OperationalState::default()));
-        let (board, element) = Board::new(operational_state.clone());
-        let board = board;
+        let board = Board::new(operational_state.clone());
 
         operational_state
             .transition(Transitions::Idle)
             .expect("Failed to set operational state");
 
-        (
-            System {
-                system_state: Arc::new(Mutex::new(SystemState::default())),
-                operational_state,
-                board,
-                events: Arc::new(Mutex::new(EventBuffer::new())),
-            },
-            element,
-        )
+        System {
+            system_state: Arc::new(Mutex::new(SystemState::default())),
+            operational_state,
+            board,
+            events: Arc::new(Mutex::new(EventBuffer::new())),
+        }
     }
 
     pub fn generate_report(&self) -> StatusReport {

@@ -1,9 +1,6 @@
+use crate::components::{boiler::Boiler, pump::Pump};
 use crate::config;
-use crate::gpio::{
-    adc::Adc,
-    pwm::{Pwm, PwmBuilder},
-    switch::Switches,
-};
+use crate::gpio::{adc::Adc, switch::Switches};
 use crate::indicator::ring::{Ring, State as IndicatorState};
 use crate::schemas::status::Device as DeviceReport;
 use crate::sensors::pressure::SeeedWaterPressureSensor;
@@ -20,7 +17,6 @@ use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
 };
-use esp_idf_svc::hal::gpio::Gpio1;
 use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
 use esp_idf_svc::timer::EspTaskTimerService;
@@ -31,8 +27,6 @@ use esp_idf_svc::{
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 
-pub type Element = Pwm<'static, Gpio1>;
-
 #[derive(Clone)]
 pub struct Board {
     pub indicator: Ring,
@@ -40,11 +34,12 @@ pub struct Board {
     pub scale: LoadCell,
     pub switches: Switches,
     pub pressure: Arc<RwLock<f32>>,
-    pub pump: crate::components::pump::Interface,
+    pub pump: Pump,
+    pub boiler: Boiler,
 }
 
 impl Board {
-    pub fn new(operational_state: Arc<Mutex<OperationalState>>) -> (Self, Element) {
+    pub fn new(operational_state: Arc<Mutex<OperationalState>>) -> Self {
         operational_state
             .transition(Transitions::StartingUpStage("Board Setup".to_string()))
             .expect("Failed to set operational state");
@@ -186,12 +181,8 @@ impl Board {
             .expect("Failed to set operational state");
         log::info!("Setting up outputs");
 
-        let element: Element = PwmBuilder::new()
-            .with_interval(config::BOILER_PWM_PERIOD)
-            .with_pin(peripherals.pins.gpio1)
-            .build();
-
-        let pump = crate::components::pump::Pump::start(
+        let boiler = Boiler::new(temperature.clone(), peripherals.pins.gpio1);
+        let pump = Pump::new(
             peripherals.pins.gpio42,
             peripherals.pins.gpio2,
             pressure_probe.clone(),
@@ -201,17 +192,15 @@ impl Board {
 
         log::info!("Board setup complete");
 
-        (
-            Board {
-                indicator: ring,
-                temperature,
-                scale: loadcell,
-                switches,
-                pump,
-                pressure: pressure_probe,
-            },
-            element,
-        )
+        Board {
+            indicator: ring,
+            temperature,
+            scale: loadcell,
+            switches,
+            pump,
+            boiler,
+            pressure: pressure_probe,
+        }
     }
 
     async fn connect_wifi(wifi: &mut AsyncWifi<EspWifi<'static>>) -> anyhow::Result<()> {

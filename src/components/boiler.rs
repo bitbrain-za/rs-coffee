@@ -1,7 +1,8 @@
-use crate::board::Element;
 use crate::config;
+use crate::gpio::pwm::PwmBuilder;
 use crate::models::boiler::{BoilerModel, BoilerModelParameters};
 use esp_idf_svc::hal::delay::FreeRtos;
+use esp_idf_svc::hal::gpio::OutputPin;
 use std::sync::{
     mpsc::{channel, Sender},
     Arc, RwLock,
@@ -81,18 +82,21 @@ pub struct Boiler {
 }
 
 impl Boiler {
-    pub fn get_mailbox(&self) -> Mailbox {
-        self.mailbox.clone()
-    }
-
     pub fn send_message(&self, message: Message) {
         self.mailbox.send(message).unwrap();
     }
 
-    pub fn new(element: Element, temperature_probe: Arc<RwLock<f32>>) -> Self {
+    pub fn new<PE>(temperature_probe: Arc<RwLock<f32>>, element_pin: PE) -> Self
+    where
+        PE: OutputPin,
+    {
         let model = BoilerModel::new(Some(config::STAND_IN_AMBIENT));
         let (mailbox, rx) = channel::<Message>();
-        let mut element = element;
+        let mut element = PwmBuilder::new()
+            .with_interval(config::BOILER_PWM_PERIOD)
+            .with_pin(element_pin)
+            .build();
+
         #[cfg(feature = "simulate")]
         let boiler_simulator = crate::models::boiler::BoilerModel::new(Some(25.0));
         let mut next_iteration = Instant::now() + Duration::from_millis(UPDATE_INTERVAL);
