@@ -23,7 +23,7 @@ pub struct Adc<
     next_poll: Instant,
     samples: Vec<(u16, u16)>,
     samples_to_average: usize,
-    last_reading: (f32, f32),
+    last_reading: (f64, f64),
 }
 
 impl<'a, T, P, M, N> Adc<'a, T, P, M, N>
@@ -50,7 +50,7 @@ where
         }
     }
 
-    pub fn read(&mut self) -> Option<(f32, f32)> {
+    pub fn read(&mut self) -> Option<(f64, f64)> {
         let raw_temperature = self
             .temperature_probe
             .read()
@@ -64,8 +64,8 @@ where
                 .samples
                 .iter()
                 .fold((0, 0), |acc, (t, p)| (acc.0 + *t as u32, acc.1 + *p as u32));
-            let average_temperature_sample = average_temperature as f32 / self.samples.len() as f32;
-            let average_pressure_sample = average_pressure as f32 / self.samples.len() as f32;
+            let average_temperature_sample = average_temperature as f64 / self.samples.len() as f64;
+            let average_pressure_sample = average_pressure as f64 / self.samples.len() as f64;
 
             self.samples.clear();
 

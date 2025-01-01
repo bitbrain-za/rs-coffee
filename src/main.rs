@@ -145,11 +145,11 @@ fn main() -> Result<()> {
 
                 match operational_state {
                     OperationalState::Idle => {
-                        log::debug!("Boiler temperature: {}", boiler_temperature);
-                        log::debug!("Pump pressure: {}", pump_pressure);
-                        log::debug!("Weight: {}", scale.get_weight());
-                        log::debug!("Flow: {}", scale.get_flow());
-                        log::debug!("Ambient temperature: {}", ambient_temperature);
+                        log::debug!("Ambient temperature: {:.4}", ambient_temperature);
+                        log::debug!("Boiler temperature: {:.4}", boiler_temperature);
+                        log::debug!("Pump pressure: {:.2}", pump_pressure);
+                        log::debug!("Weight: {:.2}", scale.get_weight());
+                        log::debug!("Flow: {:.2}", scale.get_flow());
                         board.indicator.set_state(indicator::ring::State::Idle);
                     }
                     OperationalState::Brewing => {

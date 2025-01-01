@@ -91,13 +91,17 @@ impl Board {
             timer_service,
         )
         .expect("Failed to create async wifi");
-        block_on(Self::connect_wifi(&mut wifi)).expect("Failed to connect wifi");
-        let ip_info = wifi
-            .wifi()
-            .sta_netif()
-            .get_ip_info()
-            .expect("Failed to get IP info");
-        log::info!("Wifi DHCP info: {:?}", ip_info);
+        match block_on(Self::connect_wifi(&mut wifi)) {
+            Ok(_) => {
+                let ip_info = wifi
+                    .wifi()
+                    .sta_netif()
+                    .get_ip_info()
+                    .expect("Failed to get IP info");
+                log::info!("Wifi DHCP info: {:?}", ip_info);
+            }
+            Err(e) => log::error!("Failed to connect wifi: {:?}", e),
+        }
         core::mem::forget(wifi);
 
         log::info!("Setting up switches");

@@ -45,13 +45,14 @@ impl Storable for Pt100 {
 }
 
 impl Pt100 {
-    fn convert_voltage_to_resistance(&self, voltage: f32) -> f32 {
-        (1800.0 * voltage + self.calibration * 100.0 * 18.0) / (self.calibration * 18.0 - voltage)
+    fn convert_voltage_to_resistance(&self, voltage: f64) -> f64 {
+        (1800.0 * voltage + self.calibration as f64 * 100.0 * 18.0)
+            / (self.calibration as f64 * 18.0 - voltage)
     }
 }
 
 impl crate::sensors::traits::TemperatureProbe for Pt100 {
-    fn convert_voltage_to_degrees(&self, voltage: f32) -> Result<f32, String> {
+    fn convert_voltage_to_degrees(&self, voltage: f64) -> Result<f32, String> {
         let resistance = self.convert_voltage_to_resistance(voltage);
         match PT100_TAB.binary_search_by(|&x| {
             x.partial_cmp(&resistance)
@@ -68,13 +69,13 @@ impl crate::sensors::traits::TemperatureProbe for Pt100 {
                 let r_upper = PT100_TAB[i];
 
                 let distance = (resistance - r_lower) / (r_upper - r_lower);
-                Ok((i - 1) as f32 + distance)
+                Ok((i - 1) as f32 + distance as f32)
             }
         }
     }
 }
 
-const PT100_TAB: [f32; 400] = [
+const PT100_TAB: [f64; 400] = [
     100.0, 100.39, 100.78, 101.17, 101.56, 101.95, 102.34, 102.73, 103.12, 103.51, 103.9, 104.29,
     104.68, 105.07, 105.46, 105.85, 106.24, 106.63, 107.02, 107.4, 107.79, 108.18, 108.57, 108.96,
     109.35, 109.73, 110.12, 110.51, 110.9, 111.29, 111.67, 112.06, 112.45, 112.83, 113.22, 113.61,
