@@ -10,3 +10,7 @@ gateway = "ws://localhost:9011"
 [[net.forward]]
 from = "localhost:8180"
 to = "target:80"
+
+[[chip]]
+name = 'a02yyuw'
+binary = './chips/a02yyuw/chip.wasm'

@@ -130,6 +130,7 @@ fn main() -> Result<()> {
     let pressure_probe = system.board.pressure.clone();
     let pump = system.board.pump.clone();
     let board = system.board.clone();
+    let level = system.board.level_sensor.clone();
 
     let mut previous_switch_state = SwitchesState::Idle;
 
@@ -150,6 +151,7 @@ fn main() -> Result<()> {
                         log::debug!("Pump pressure: {:.2}", pump_pressure);
                         log::debug!("Weight: {:.2}", scale.get_weight());
                         log::debug!("Flow: {:.2}", scale.get_flow());
+                        log::debug!("Level: {}", *level.distance.read().unwrap());
                         board.indicator.set_state(indicator::ring::State::Idle);
                     }
                     OperationalState::Brewing => {
@@ -251,12 +253,18 @@ fn main() -> Result<()> {
                     pump.turn_off();
                 }
                 SwitchesState::Brew => {
-                    info!(system, "Switched to brew");
-                    log::info!("Switched to brew");
-                    system.board.scale.start_brew();
-                    pump.turn_on(Some(Duration::from_secs(5)));
-                    let mode = components::boiler::Mode::Mpc { target: 94.0 };
-                    boiler.send_message(BoilerMessage::SetMode(mode));
+                    level.send_message(sensors::a02yyuw::Message::DoRead);
+                    std::thread::sleep(Duration::from_millis(400));
+                    if *level.distance.read().unwrap() >= config::LOW_LEVEL_THRESHOLD {
+                        log::warn!("Threshold too low to brew");
+                    } else {
+                        info!(system, "Switched to brew");
+                        log::info!("Switched to brew");
+                        system.board.scale.start_brew();
+                        pump.turn_on(Some(Duration::from_secs(5)));
+                        let mode = components::boiler::Mode::Mpc { target: 94.0 };
+                        boiler.send_message(BoilerMessage::SetMode(mode));
+                    }
                 }
                 SwitchesState::HotWater => {
                     log::info!("Switched to hot water");

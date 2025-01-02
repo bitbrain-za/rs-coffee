@@ -5,8 +5,6 @@
  - [ ] Move ADC to I2C ADC (ADS1115)
  - [ ] Review config and NVS
  - [ ] Level Sensing
- - [ ] Ambient Sensor (DS18B20)
-
  
  # 0.8
  - [ ] Add Availability
@@ -16,3 +14,4 @@
  - [ ] SD Card - Wait for next release: https://github.com/esp-rs/esp-idf-svc/issues/467
  - [ ] Display
  - [ ] Add endpoint to set loadcell scaling
+ - [ ] Move DS18b20 to RMT driver on next esp-idf-hal release

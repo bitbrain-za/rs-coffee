@@ -220,6 +220,29 @@
             "attrs": {
                 "value": "4700"
             }
+        },
+        {
+            "type": "chip-a02yyuw",
+            "id": "chip1",
+            "top": 153.6,
+            "left": 441.6,
+            "attrs": {
+                "value": "4700"
+            }
+        },
+        {
+            "type": "wokwi-vcc",
+            "id": "vcc7",
+            "top": 115.96,
+            "left": 566.4,
+            "attrs": {}
+        },
+        {
+            "type": "wokwi-gnd",
+            "id": "gnd9",
+            "top": 182.4,
+            "left": 565.8,
+            "attrs": {}
         }
     ],
     "connections": [
@@ -548,6 +571,40 @@
             [
                 "v0",
                 "h-240.05"
+            ]
+        ],
+        [
+            "vcc7:VCC",
+            "chip1:VCC",
+            "red",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "gnd9:GND",
+            "chip1:GND",
+            "black",
+            [
+                "v0"
+            ]
+        ],
+        [
+            "esp:RX",
+            "chip1:TX",
+            "green",
+            [
+                "h211.2",
+                "v115.2"
+            ]
+        ],
+        [
+            "vcc7:VCC",
+            "chip1:MODE",
+            "red",
+            [
+                "v0",
+                "h-134.4"
             ]
         ]
     ],

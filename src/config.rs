@@ -37,6 +37,8 @@ pub const MPC_SMOOTHING_FACTOR: f32 = 0.5;
 
 pub const MAX_PUMP_PRESSURE: Bar = 15.0;
 
+pub const LOW_LEVEL_THRESHOLD: Millimeters = 100;
+
 pub struct Shots {}
 
 impl Shots {

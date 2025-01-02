@@ -3,6 +3,7 @@ use crate::config;
 use crate::gpio::{adc::Adc, switch::Switches};
 use crate::indicator::ring::{Ring, State as IndicatorState};
 use crate::schemas::status::Device as DeviceReport;
+use crate::sensors::a02yyuw::A02yyuw;
 use crate::sensors::pressure::SeeedWaterPressureSensor;
 use crate::sensors::pt100::Pt100;
 use crate::sensors::scale::{Interface as LoadCell, Scale};
@@ -39,6 +40,7 @@ pub struct Board {
     pub pressure: Arc<RwLock<f32>>,
     pub pump: Pump,
     pub boiler: Boiler,
+    pub level_sensor: A02yyuw,
 }
 
 impl Board {
@@ -133,6 +135,13 @@ impl Board {
         )
         .unwrap();
 
+        log::info!("Setting up level sensor");
+        let tx = peripherals.pins.gpio43;
+        let rx = peripherals.pins.gpio44;
+        let uart = peripherals.uart0;
+        let level_sensor = A02yyuw::new(uart, rx, tx);
+        log::info!("Starting level sensor");
+
         let sensor_killswitch = Arc::new(Mutex::new(false));
         let sensor_killswitch_clone = sensor_killswitch.clone();
         thread::Builder::new()
@@ -226,6 +235,7 @@ impl Board {
             pump,
             boiler,
             pressure: pressure_probe,
+            level_sensor,
         }
     }
 

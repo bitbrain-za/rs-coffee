@@ -1,3 +1,4 @@
+pub mod a02yyuw;
 pub mod ambient;
 pub mod pressure;
 pub mod pt100;
