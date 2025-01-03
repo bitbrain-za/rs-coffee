@@ -272,6 +272,7 @@ impl Board {
             pressure: *self.pressure.read().unwrap(),
             weight: *self.scale.weight.read().unwrap(),
             ambient: *self.ambient_temperature.read().unwrap(),
+            level: *self.level_sensor.distance.read().unwrap(),
             power: 0.0,
         }
     }

@@ -8,6 +8,7 @@ pub struct Device {
     pub weight: Grams,
     pub ambient: Temperature,
     pub power: Watts,
+    pub level: Millimeters,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
