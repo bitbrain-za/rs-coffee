@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
 pub enum LevelFilter {
     Panic,
     Error,
     Warn,
+    #[default]
     Info,
     Debug,
     Trace,

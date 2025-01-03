@@ -99,7 +99,7 @@ fn main() -> Result<()> {
         &mqtt_url,
         mqtt_client_id,
         &system,
-        Some(config::EVENT_LEVEL),
+        Some(config::Mqtt::EVENT_LEVEL),
     );
 
     let temperature_probe = system.board.temperature.clone();
