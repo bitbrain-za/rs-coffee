@@ -1,5 +1,4 @@
-use crate::config;
-use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
+use crate::config::Boiler as Config;
 use crate::types::{Temperature, Watts};
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
@@ -29,33 +28,6 @@ impl std::fmt::Display for BoilerModelParameters {
             "Thermal Mass: {}\nAmbient Transfer Coefficient: {}\nProbe Responsiveness: {}\n",
             self.thermal_mass, self.ambient_transfer_coefficient, self.probe_responsiveness
         )
-    }
-}
-
-impl From<&BoilerModelParameters> for Value {
-    fn from(params: &BoilerModelParameters) -> Self {
-        Value::BoilerModelParameters(*params)
-    }
-}
-
-impl Storable for BoilerModelParameters {
-    fn load_or_default() -> Self {
-        let kvs = match KeyValueStore::new_blocking(std::time::Duration::from_millis(1000)) {
-            Ok(kvs) => kvs,
-            Err(e) => {
-                log::error!("Failed to create key value store: {:?}", e);
-                return Self::default();
-            }
-        };
-        match kvs.get(Key::BoilerModelParameters) {
-            Value::BoilerModelParameters(calibration) => calibration,
-            _ => Self::default(),
-        }
-    }
-
-    fn save(&self) -> Result<(), KvsError> {
-        let mut kvs = KeyValueStore::new_blocking(std::time::Duration::from_millis(1000))?;
-        kvs.set(self.into())
     }
 }
 
@@ -114,11 +86,12 @@ impl BoilerModel {
     pub fn new(
         ambient_probe: Arc<RwLock<Temperature>>,
         initial_temperature: Option<Temperature>,
+        config: Config,
     ) -> Self {
         let ambient_temperature = *ambient_probe.read().unwrap();
         Self {
-            max_power: config::BOILER_POWER,
-            parameters: BoilerModelParameters::load_or_default(),
+            max_power: config.power,
+            parameters: config.mpc.parameters,
 
             flow_rate_kg_per_sec: 0.0,
 
@@ -127,7 +100,7 @@ impl BoilerModel {
             ambient_probe,
 
             power: 0.0,
-            smoothing_factor: config::MPC_SMOOTHING_FACTOR,
+            smoothing_factor: config.mpc.smoothing_factor,
         }
     }
 
@@ -138,7 +111,6 @@ impl BoilerModel {
         boiler_temperature: Temperature,
     ) {
         self.parameters = parameters;
-        self.parameters.save().unwrap();
 
         self.boiler_temperature = boiler_temperature;
         self.probe_temperature = probe_temperature;

@@ -1,100 +1,245 @@
+use crate::kv_store::*;
 use crate::types::*;
+use dotenv_codegen::dotenv;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Config {
     pub mqtt: Mqtt,
     pub load_cell: LoadCell,
     pub adc: Adc,
     pub boiler: Boiler,
-    pub mpc: Mpc,
     pub pump: Pump,
     pub level_sensor: LevelSensor,
     pub indicator: Indicator,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct Mqtt {}
+impl Config {
+    // pub fn load_or_default() -> Self {
+    //     Self::default()
+    // }
+    pub fn load_or_default() -> Self {
+        match Self::try_load() {
+            Ok(config) => config,
+            Err(e) => {
+                log::error!("Failed to load config: {:?}, creating a default", e);
+                let cfg = Self::default();
+                if let Err(e) = cfg.save() {
+                    log::error!("Failed to save default config: {:?}", e);
+                }
+                cfg
+            }
+        }
+    }
+
+    pub fn try_load() -> Result<Self, Error> {
+        let fs = KeyValueStore::new_blocking(Duration::from_secs(5))?;
+        let config = FileType::Config.load(&fs)?;
+
+        match config {
+            File::Config(config) => Ok(config),
+            #[allow(unreachable_patterns)]
+            _ => Err(Error::NotFound("Config".to_string())),
+        }
+    }
+
+    pub fn save(&self) -> Result<(), Error> {
+        let mut fs = KeyValueStore::new_blocking(Duration::from_secs(5))?;
+        File::Config(self.clone().to_owned()).save(&mut fs)
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct Mqtt {
+    pub report_interval: Duration,
+    pub status_topic: String,
+    pub event_topic: String,
+    pub event_level: crate::schemas::event::LevelFilter,
+    pub broker: String,
+    pub client_id: String,
+    pub username: String,
+    pub password: String,
+    pub port: u16,
+}
+
+impl Default for Mqtt {
+    fn default() -> Self {
+        const DEFAULT_REPORT_INTERVAL: Duration = Duration::from_secs(2);
+        const DEFAULT_EVENT_LEVEL: crate::schemas::event::LevelFilter =
+            crate::schemas::event::LevelFilter::Info;
+        let client_id = dotenv!("MQTT_CLIENT_ID").to_string();
+        Mqtt {
+            report_interval: DEFAULT_REPORT_INTERVAL,
+            status_topic: format!("{}/{}", client_id, "status"),
+            event_topic: format!("{}/{}", client_id, "event"),
+            event_level: DEFAULT_EVENT_LEVEL,
+            broker: dotenv!("MQTT_SERVER").try_into().expect("Invalid MQTT URL"),
+            client_id,
+            username: dotenv!("MQTT_USER").to_string(),
+            password: dotenv!("MQTT_PASSWORD").to_string(),
+            port: dotenv!("MQTT_PORT").parse().expect("Invalid MQTT Port"),
+        }
+    }
+}
+
 impl Mqtt {
-    pub const REPORT_INTERVAL: Duration = Duration::from_secs(2);
-    pub const STATUS_TOPIC: &'static str = "dummy/status";
-    pub const EVENT_TOPIC: &'static str = "dummy/event";
-    pub const EVENT_LEVEL: crate::schemas::event::LevelFilter =
-        crate::schemas::event::LevelFilter::Debug;
+    pub fn url(&self) -> String {
+        format!("mqtt://{}:{}", self.broker, self.port)
+    }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct LoadCell {
-    scaling: f32,
-    sampling_rate: Duration,
-    window: usize,
+    pub scaling: f32,
+    pub sampling_rate: Duration,
+    pub window: usize,
 }
-pub const LOAD_SENSOR_SCALING: f32 = 4.761905;
-pub const SCALE_POLLING_RATE_MS: Duration = Duration::from_millis(10 * 10);
-pub const SCALE_SAMPLES: usize = 5;
 
-#[derive(Serialize, Deserialize)]
+impl Default for LoadCell {
+    fn default() -> Self {
+        const LOAD_SENSOR_SCALING: f32 = 4.761905;
+        const SCALE_POLLING_RATE_MS: Duration = Duration::from_millis(10 * 10);
+        const SCALE_SAMPLES: usize = 5;
+
+        LoadCell {
+            scaling: LOAD_SENSOR_SCALING,
+            sampling_rate: SCALE_POLLING_RATE_MS,
+            window: SCALE_SAMPLES,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct Adc {
-    polling_interval: Duration,
-    window: usize,
+    pub polling_interval: Duration,
+    pub window: usize,
 }
-pub const ADC_POLLING_RATE_MS: Duration = Duration::from_millis(10);
-pub const ADC_SAMPLES: usize = 100;
 
-#[derive(Serialize, Deserialize)]
+impl Default for Adc {
+    fn default() -> Self {
+        const ADC_POLLING_RATE_MS: Duration = Duration::from_millis(10);
+        const ADC_SAMPLES: usize = 100;
+
+        Adc {
+            polling_interval: ADC_POLLING_RATE_MS,
+            window: ADC_SAMPLES,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct Boiler {
-    pwm_period: Duration,
-    power: Watts,
-    pt100_calibration_factor: f32,
+    pub pwm_period: Duration,
+    pub power: Watts,
+    pub pt100_calibration_factor: f32,
+    pub mpc: Mpc,
 }
-pub const BOILER_PWM_PERIOD: Duration = Duration::from_millis(1000);
-pub const BOILER_POWER: Watts = 2000.0;
-pub const PT_100_CALIBRATION_FACTOR: f32 = 2.209;
 
-#[derive(Serialize, Deserialize)]
+impl Default for Boiler {
+    fn default() -> Self {
+        const BOILER_PWM_PERIOD: Duration = Duration::from_millis(1000);
+        const BOILER_POWER: Watts = 2000.0;
+        const PT_100_CALIBRATION_FACTOR: f32 = 2.209;
+
+        Boiler {
+            pwm_period: BOILER_PWM_PERIOD,
+            power: BOILER_POWER,
+            pt100_calibration_factor: PT_100_CALIBRATION_FACTOR,
+            mpc: Mpc::default(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct Mpc {
-    smoothing_factor: f32,
-    auto_tune: AutoTune,
+    pub smoothing_factor: f32,
+    pub auto_tune: AutoTune,
+    pub parameters: crate::models::boiler::BoilerModelParameters,
 }
-pub const MPC_SMOOTHING_FACTOR: f32 = 0.5;
+impl Default for Mpc {
+    fn default() -> Self {
+        pub const MPC_SMOOTHING_FACTOR: f32 = 0.5;
+        Mpc {
+            smoothing_factor: MPC_SMOOTHING_FACTOR,
+            auto_tune: AutoTune::default(),
+            parameters: crate::models::boiler::BoilerModelParameters::default(),
+        }
+    }
+}
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct AutoTune {
-    max_power: Watts,
-    steady_state_power: Watts,
-    target_temperature: Temperature,
-    test_time: Duration,
+    pub max_power: Watts,
+    pub steady_state_power: Watts,
+    pub target_temperature: Temperature,
+    pub steady_state_test_time: Duration,
 }
-pub const AUTOTUNE_MAX_POWER: Watts = 1000.0;
-pub const AUTOTUNE_STEADY_STATE_POWER: Watts = AUTOTUNE_MAX_POWER * 0.5;
-pub const AUTOTUNE_TARGET_TEMPERATURE: Temperature = 94.0;
-pub const STEADY_STATE_TEST_TIME: Duration = Duration::from_secs(600);
+impl Default for AutoTune {
+    fn default() -> Self {
+        const AUTOTUNE_MAX_POWER: Watts = 1000.0;
+        const AUTOTUNE_STEADY_STATE_POWER: Watts = AUTOTUNE_MAX_POWER * 0.5;
+        const AUTOTUNE_TARGET_TEMPERATURE: Temperature = 94.0;
+        const STEADY_STATE_TEST_TIME: Duration = Duration::from_secs(600);
+        AutoTune {
+            max_power: AUTOTUNE_MAX_POWER,
+            steady_state_power: AUTOTUNE_STEADY_STATE_POWER,
+            target_temperature: AUTOTUNE_TARGET_TEMPERATURE,
+            steady_state_test_time: STEADY_STATE_TEST_TIME,
+        }
+    }
+}
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct Pump {
-    pwm_period: Duration,
-    max_pressure: Bar,
-    backflush_on_time: Duration,
-    backflush_off_time: Duration,
+    pub pwm_period: Duration,
+    pub max_pressure: Bar,
+    pub backflush_on_time: Duration,
+    pub backflush_off_time: Duration,
 }
-pub const PUMP_PWM_PERIOD: Duration = Duration::from_millis(100);
-pub const MAX_PUMP_PRESSURE: Bar = 15.0;
-pub const BACKFLUSH_ON_TIME: Duration = Duration::from_secs(10);
-pub const BACKFLUSH_OFF_TIME: Duration = Duration::from_secs(10);
+impl Default for Pump {
+    fn default() -> Self {
+        const PUMP_PWM_PERIOD: Duration = Duration::from_millis(100);
+        const MAX_PUMP_PRESSURE: Bar = 15.0;
+        const BACKFLUSH_ON_TIME: Duration = Duration::from_secs(10);
+        const BACKFLUSH_OFF_TIME: Duration = Duration::from_secs(10);
+        Pump {
+            pwm_period: PUMP_PWM_PERIOD,
+            max_pressure: MAX_PUMP_PRESSURE,
+            backflush_on_time: BACKFLUSH_ON_TIME,
+            backflush_off_time: BACKFLUSH_OFF_TIME,
+        }
+    }
+}
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct LevelSensor {
-    low_level_threshold: Millimeters,
+    pub low_level_threshold: Millimeters,
 }
-pub const LOW_LEVEL_THRESHOLD: Millimeters = 100;
+impl Default for LevelSensor {
+    fn default() -> Self {
+        const LOW_LEVEL_THRESHOLD: Millimeters = 100;
+        LevelSensor {
+            low_level_threshold: LOW_LEVEL_THRESHOLD,
+        }
+    }
+}
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 pub struct Indicator {
-    refresh_interval: Duration,
+    pub refresh_interval: Duration,
+    pub led_count: usize,
 }
-pub const LED_COUNT: usize = 32;
-pub const LED_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+impl Default for Indicator {
+    fn default() -> Self {
+        const LED_REFRESH_INTERVAL: Duration = Duration::from_millis(100);
+        pub const LED_COUNT: usize = 32;
+        Indicator {
+            led_count: LED_COUNT,
+            refresh_interval: LED_REFRESH_INTERVAL,
+        }
+    }
+}
 
 #[cfg(feature = "simulate")]
 pub const TIME_DILATION_FACTOR: f32 = 0.01;

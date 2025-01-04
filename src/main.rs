@@ -17,7 +17,6 @@ mod types;
 use crate::components::boiler::Message as BoilerMessage;
 use anyhow::Result;
 use app_state::System;
-use dotenv_codegen::dotenv;
 use gpio::switch::SwitchesState;
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
@@ -91,16 +90,8 @@ fn main() -> Result<()> {
     let server = api::rest::create_server(api_state.clone())?;
     core::mem::forget(server);
 
-    let mqtt_url: String = dotenv!("MQTT_SERVER").try_into().expect("Invalid MQTT URL");
-    let mqtt_port: u16 = dotenv!("MQTT_PORT").parse().expect("Invalid MQTT Port");
-    let mqtt_url = format!("mqtt://{}:{}", mqtt_url, mqtt_port);
-    let mqtt_client_id = dotenv!("MQTT_CLIENT_ID");
-    api::mqtt::mqtt_create(
-        &mqtt_url,
-        mqtt_client_id,
-        &system,
-        Some(config::Mqtt::EVENT_LEVEL),
-    );
+    let config_mqtt = system.config.read().unwrap().mqtt.clone();
+    api::mqtt::mqtt_create(config_mqtt, &system);
 
     let temperature_probe = system.board.temperature.clone();
     let ambient_probe = system.board.ambient_temperature.clone();
@@ -114,6 +105,7 @@ fn main() -> Result<()> {
         Duration::from_millis(1000),
         temperature_probe.clone(),
         ambient_probe.clone(),
+        system.config.read().unwrap().boiler.mpc.auto_tune,
     );
 
     info!(system, "Starting up");
@@ -193,6 +185,7 @@ fn main() -> Result<()> {
                             Duration::from_millis(1000),
                             temperature_probe.clone(),
                             ambient_probe.clone(),
+                            system.config.read().unwrap().boiler.mpc.auto_tune,
                         );
                     }
                     OperationalState::AutoTuning => {
@@ -241,6 +234,13 @@ fn main() -> Result<()> {
         }
 
         let current_state = switches.get_state();
+        let level_sensor_max = system
+            .config
+            .read()
+            .unwrap()
+            .level_sensor
+            .low_level_threshold;
+
         if previous_switch_state != current_state {
             if previous_switch_state == SwitchesState::Brew {
                 system.board.scale.stop_brewing();
@@ -255,7 +255,7 @@ fn main() -> Result<()> {
                 SwitchesState::Brew => {
                     level.send_message(sensors::a02yyuw::Message::DoRead);
                     std::thread::sleep(Duration::from_millis(400));
-                    if *level.distance.read().unwrap() >= config::LOW_LEVEL_THRESHOLD {
+                    if *level.distance.read().unwrap() >= level_sensor_max {
                         log::warn!("Threshold too low to brew");
                     } else {
                         info!(system, "Switched to brew");

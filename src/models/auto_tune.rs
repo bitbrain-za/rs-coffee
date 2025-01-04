@@ -1,6 +1,6 @@
 use crate::components::boiler::{Message as ElementMessage, Mode as ElementMode};
 use crate::types::{Temperature, Watts};
-use crate::{config, models::boiler::BoilerModelParameters};
+use crate::{config::AutoTune as Config, models::boiler::BoilerModelParameters};
 use esp_idf_hal::delay::FreeRtos;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
@@ -149,6 +149,7 @@ pub struct HeuristicAutoTuner {
     percentage_complete: f32,
     temperature_probe: Arc<RwLock<Temperature>>,
     pub boiler: Option<crate::components::boiler::Boiler>,
+    config: Config,
 }
 
 pub struct AmbientTest {
@@ -207,6 +208,7 @@ impl AmbientTest {
 #[derive(Default)]
 struct HeatupTest {
     target: Temperature,
+    max_power: Watts,
 
     temperature_samples: Vec<Temperature>,
     sample_count: usize,
@@ -396,7 +398,7 @@ impl HeatupTest {
                     temperature_samples: self.temperature_samples.clone(),
                     sample_count: self.sample_count,
                     sample_distance: self.sample_distance,
-                    power: config::AUTOTUNE_MAX_POWER,
+                    power: self.max_power,
                     time_to_halfway_point: Duration::from_secs_f32(
                         convert_to_normal_time_secs_f32(self.time_to_halfway_point),
                     ),
@@ -463,7 +465,11 @@ impl PartialEq for SteadyStateTestState {
 }
 
 impl SteadyStateTest {
-    fn new(data: HeatupTestData, ambient_temperature: Temperature) -> Result<Self, Error> {
+    fn new(
+        data: HeatupTestData,
+        ambient_temperature: Temperature,
+        duration: Duration,
+    ) -> Result<Self, Error> {
         let mut data = data;
         let (target, mpc) = data.estimate_values_from_heatup(ambient_temperature)?;
         Ok(Self {
@@ -475,7 +481,7 @@ impl SteadyStateTest {
             previous_temperature: 0.0,
 
             last_test_instant: Instant::now(),
-            test_duration: config::STEADY_STATE_TEST_TIME,
+            test_duration: duration,
             settle_mode: SettleMode::None,
 
             start_time: None,
@@ -647,12 +653,12 @@ impl SteadyStateTest {
     fn estimate_values_from_thermal_transfer(
         &mut self,
         ambient_temperature: Temperature,
+        max_power: Watts,
     ) -> Result<BoilerModelParameters, Error> {
         log::debug!("Target: {}, Ambient: {}", self.target, ambient_temperature);
         let ambient_transfer_coefficient = self.power() / (self.target - ambient_temperature);
 
-        let asymptotic_temperature =
-            ambient_temperature + config::AUTOTUNE_MAX_POWER / ambient_transfer_coefficient;
+        let asymptotic_temperature = ambient_temperature + max_power / ambient_transfer_coefficient;
         log::debug!("Asymptotic temperature: {}", asymptotic_temperature);
 
         let (s0, s1, _) = self
@@ -691,6 +697,7 @@ impl HeuristicAutoTuner {
         sample_time: Duration,
         temperature_probe: Arc<RwLock<Temperature>>,
         ambient_probe: Arc<RwLock<Temperature>>,
+        config: Config,
     ) -> Self {
         Self {
             sample_time,
@@ -704,6 +711,7 @@ impl HeuristicAutoTuner {
             percentage_complete: 0.0,
             temperature_probe,
             boiler: None,
+            config,
         }
     }
 
@@ -846,10 +854,11 @@ impl HeuristicAutoTuner {
                     log::debug!("Measuring Heatup");
                     let mut heatup_test = HeatupTest {
                         sample_time: self.sample_time,
+                        max_power: self.config.max_power,
                         ..Default::default()
                     };
-                    heatup_test.start(current_temperature, config::AUTOTUNE_TARGET_TEMPERATURE);
-                    self.current_power = config::AUTOTUNE_MAX_POWER;
+                    heatup_test.start(current_temperature, self.config.target_temperature);
+                    self.current_power = self.config.max_power;
                     self.set_percentage_complete(10.0);
                     Ok(Some(HeuristicAutoTunerState::MeasureHeatingUp(heatup_test)))
                 }
@@ -876,11 +885,14 @@ impl HeuristicAutoTuner {
                     let ambient_temperature = *self.ambient_probe.read().unwrap();
                     let (estimated_temperature, _mpc) =
                         heatup_results.estimate_values_from_heatup(ambient_temperature)?;
-                    let mut ambient_transfer_test =
-                        SteadyStateTest::new(heatup_results, ambient_temperature)?;
+                    let mut ambient_transfer_test = SteadyStateTest::new(
+                        heatup_results,
+                        ambient_temperature,
+                        self.config.steady_state_test_time,
+                    )?;
                     self.current_power = 0.0;
                     ambient_transfer_test.start(
-                        config::STEADY_STATE_TEST_TIME,
+                        self.config.steady_state_test_time,
                         SettleMode::Value(estimated_temperature),
                     );
                     self.modeled_temperature = estimated_temperature;
@@ -919,6 +931,7 @@ impl HeuristicAutoTuner {
                     log::info!("Estimating values from thermal transfer");
                     let results = test.estimate_values_from_thermal_transfer(
                         *self.ambient_probe.read().unwrap(),
+                        self.config.max_power,
                     )?;
 
                     self.results = Some(results);
@@ -936,7 +949,7 @@ impl HeuristicAutoTuner {
                 }
                 SteadyStateTestState::Settling(SettlingState::Heating) => {
                     self.increment_percentage_up_to(0.1, 70.0);
-                    self.current_power = config::AUTOTUNE_STEADY_STATE_POWER;
+                    self.current_power = self.config.steady_state_power;
                     self.set_element_power(self.current_power);
                     Ok(None)
                 }
@@ -945,7 +958,7 @@ impl HeuristicAutoTuner {
                     self.current_power = if current_temperature >= test.target {
                         0.0
                     } else {
-                        config::AUTOTUNE_STEADY_STATE_POWER
+                        self.config.steady_state_power
                     };
                     self.increment_percentage_up_to(0.1, 90.0);
                     Ok(None)

@@ -1,5 +1,5 @@
 use crate::components::{boiler::Boiler, pump::Pump};
-use crate::config;
+use crate::config::Config;
 use crate::gpio::{adc::Adc, switch::Switches};
 use crate::indicator::ring::{Ring, State as IndicatorState};
 use crate::schemas::status::Device as DeviceReport;
@@ -44,7 +44,7 @@ pub struct Board {
 }
 
 impl Board {
-    pub fn new(operational_state: Arc<Mutex<OperationalState>>) -> Self {
+    pub fn new(operational_state: Arc<Mutex<OperationalState>>, config: &Config) -> Self {
         operational_state
             .transition(Transitions::StartingUpStage("Board Setup".to_string()))
             .expect("Failed to set operational state");
@@ -59,7 +59,7 @@ impl Board {
         let onboard_led = Ring::new(
             peripherals.rmt.channel0,
             peripherals.pins.gpio48,
-            config::LED_REFRESH_INTERVAL,
+            config.indicator.refresh_interval,
             1,
         );
         onboard_led.set_state(IndicatorState::Heartbeat);
@@ -70,8 +70,8 @@ impl Board {
         let ring = Ring::new(
             channel,
             led_pin,
-            config::LED_REFRESH_INTERVAL,
-            config::LED_COUNT,
+            config.indicator.refresh_interval,
+            config.indicator.led_count,
         );
         ring.set_state(IndicatorState::Busy);
 
@@ -120,20 +120,15 @@ impl Board {
         let temperature_clone = temperature.clone();
         let pressure_probe_clone = pressure_probe.clone();
 
-        use crate::kv_store::Storable;
-        let seed_pressure_probe = SeeedWaterPressureSensor::load_or_default();
-        let pt100 = Pt100::load_or_default();
+        let seed_pressure_probe = SeeedWaterPressureSensor::default();
+        let pt100 = Pt100 {
+            calibration: config.boiler.pt100_calibration_factor,
+        };
 
         log::info!("Setting up scale");
         let dt = peripherals.pins.gpio36;
         let sck = peripherals.pins.gpio35;
-        let loadcell = Scale::start(
-            sck,
-            dt,
-            config::SCALE_POLLING_RATE_MS,
-            config::SCALE_SAMPLES,
-        )
-        .unwrap();
+        let loadcell = Scale::start(sck, dt, &config.load_cell).unwrap();
 
         log::info!("Setting up level sensor");
         let tx = peripherals.pins.gpio43;
@@ -144,26 +139,29 @@ impl Board {
 
         let sensor_killswitch = Arc::new(Mutex::new(false));
         let sensor_killswitch_clone = sensor_killswitch.clone();
+        let adc_polling_interval = config.adc.polling_interval;
+        let adc_window = config.adc.window;
         thread::Builder::new()
             .name("sensor".to_string())
             .spawn(move || {
                 let adc = AdcDriver::new(peripherals.adc1).expect("Failed to create ADC driver");
-                let config = AdcChannelConfig {
+                let channel_config = AdcChannelConfig {
                     attenuation: attenuation::DB_11,
                     calibration: true,
                     ..Default::default()
                 };
 
                 let temperature_probe =
-                    AdcChannelDriver::new(&adc, peripherals.pins.gpio4, &config)
+                    AdcChannelDriver::new(&adc, peripherals.pins.gpio4, &channel_config)
                         .expect("Failed to create ADC channel temperature");
-                let pressure_probe = AdcChannelDriver::new(&adc, peripherals.pins.gpio5, &config)
-                    .expect("Failed to create ADC channel pressure");
+                let pressure_probe =
+                    AdcChannelDriver::new(&adc, peripherals.pins.gpio5, &channel_config)
+                        .expect("Failed to create ADC channel pressure");
                 let mut adc = Adc::new(
                     temperature_probe,
                     pressure_probe,
-                    config::ADC_POLLING_RATE_MS,
-                    config::ADC_SAMPLES,
+                    adc_polling_interval,
+                    adc_window,
                 );
 
                 loop {
@@ -214,13 +212,14 @@ impl Board {
             ambient_probe.temperature.clone(),
             temperature.clone(),
             peripherals.pins.gpio1,
+            config.boiler,
         );
         let pump = Pump::new(
             peripherals.pins.gpio42,
             peripherals.pins.gpio2,
             pressure_probe.clone(),
             loadcell.weight.clone(),
-            config::PUMP_PWM_PERIOD,
+            config.pump,
         );
 
         log::info!("Board setup complete");

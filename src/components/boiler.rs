@@ -1,4 +1,4 @@
-use crate::config;
+use crate::config::{self, Boiler as Config};
 use crate::gpio::pwm::PwmBuilder;
 use crate::models::boiler::{BoilerModel, BoilerModelParameters};
 use crate::types::Temperature;
@@ -88,14 +88,15 @@ impl Boiler {
         ambient_probe: Arc<RwLock<Temperature>>,
         temperature_probe: Arc<RwLock<Temperature>>,
         element_pin: PE,
+        config: Config,
     ) -> Self
     where
         PE: OutputPin,
     {
-        let model = BoilerModel::new(ambient_probe.clone(), None);
+        let model = BoilerModel::new(ambient_probe.clone(), None, config);
         let (mailbox, rx) = channel::<Message>();
         let mut element = PwmBuilder::new()
-            .with_interval(config::BOILER_PWM_PERIOD)
+            .with_interval(config.pwm_period)
             .with_pin(element_pin)
             .build();
 
@@ -123,7 +124,7 @@ impl Boiler {
 
                     duty_cycle = match my_mode {
                         Mode::Off => 0.0,
-                        Mode::Transparent { power } => power / config::BOILER_POWER,
+                        Mode::Transparent { power } => power / config.power,
                         Mode::BangBang {
                             upper_threshold,
                             lower_threshold,

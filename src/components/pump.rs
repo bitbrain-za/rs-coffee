@@ -1,4 +1,4 @@
-use crate::config;
+use crate::config::Pump as Config;
 use crate::gpio::pwm::Pwm;
 use crate::types::*;
 use esp_idf_svc::hal::gpio::{Output, OutputPin, PinDriver};
@@ -32,15 +32,9 @@ impl Pump {
         solenoid_pin: PE,
         pressure_probe: Arc<RwLock<Bar>>,
         weight_probe: Arc<RwLock<Grams>>,
-        interval: Duration,
+        config: Config,
     ) -> Self {
-        PumpInternal::start(
-            pump_pin,
-            solenoid_pin,
-            pressure_probe,
-            weight_probe,
-            interval,
-        )
+        PumpInternal::start(pump_pin, solenoid_pin, pressure_probe, weight_probe, config)
     }
     pub fn turn_on(&self, duration: Option<Duration>) {
         if let Some(duration) = duration {
@@ -83,6 +77,7 @@ struct PumpInternal<PD: OutputPin, PE: OutputPin> {
     state: State,
     backflush_cycle_start: Instant,
     backflush_in_off_cycle: bool,
+    config: Config,
 }
 
 impl<PD, PE> PumpInternal<PD, PE>
@@ -95,19 +90,20 @@ where
         solenoid_pin: PE,
         pressure_probe: Arc<RwLock<Bar>>,
         weight_probe: Arc<RwLock<Grams>>,
-        interval: Duration,
+        config: Config,
     ) -> Pump {
         let (tx, rx) = channel();
 
         std::thread::spawn(move || {
             let mut my_pump = PumpInternal {
-                pwm: Pwm::new(pump_pin, Duration::from_millis(100), None),
+                pwm: Pwm::new(pump_pin, config.pwm_period, None),
                 solenoid: PinDriver::output(solenoid_pin).expect("Failed to create relay"),
                 pressure_probe,
                 weight_probe,
                 state: State::Off,
                 backflush_cycle_start: Instant::now(),
                 backflush_in_off_cycle: true,
+                config,
             };
             loop {
                 while let Ok(message) = rx.try_recv() {
@@ -127,12 +123,12 @@ where
                     State::Backflush => {
                         let elapsed = my_pump.backflush_cycle_start.elapsed();
 
-                        if elapsed > config::BACKFLUSH_OFF_TIME + config::BACKFLUSH_ON_TIME {
+                        if elapsed > config.backflush_off_time + config.backflush_on_time {
                             my_pump.backflush_cycle_start = Instant::now();
                             my_pump.open_valve();
-                            my_pump.set_pressure(config::MAX_PUMP_PRESSURE);
+                            my_pump.set_pressure(config.max_pressure);
                             my_pump.backflush_in_off_cycle = false;
-                        } else if elapsed > config::BACKFLUSH_ON_TIME
+                        } else if elapsed > config.backflush_on_time
                             && !my_pump.backflush_in_off_cycle
                         {
                             my_pump.backflush_in_off_cycle = true;
@@ -143,7 +139,7 @@ where
                     _ => {}
                 }
 
-                let next_tick = [Some(interval), my_pump.pwm.tick()]
+                let next_tick = [Some(config.pwm_period), my_pump.pwm.tick()]
                     .iter()
                     .filter_map(|x| *x)
                     .min()
@@ -173,7 +169,7 @@ where
             Message::On => {
                 self.state = State::On(None);
                 self.open_valve();
-                self.set_pressure(config::MAX_PUMP_PRESSURE);
+                self.set_pressure(self.config.max_pressure);
             }
             Message::Off => {
                 self.state = State::Off;
@@ -188,7 +184,7 @@ where
             Message::OnForTime(duration) => {
                 self.state = State::On(Some(Instant::now() + duration));
                 self.open_valve();
-                self.set_pressure(config::MAX_PUMP_PRESSURE);
+                self.set_pressure(self.config.max_pressure);
             }
             Message::OnForTimeAtPressure(duration, pressure) => {
                 self.state = State::On(Some(Instant::now() + duration));
@@ -208,25 +204,25 @@ where
             Message::OnForHotWater => {
                 self.state = State::On(None);
                 self.close_valve();
-                self.set_pressure(config::MAX_PUMP_PRESSURE);
+                self.set_pressure(self.config.max_pressure);
             }
             Message::Backflush => {
                 self.state = State::Backflush;
                 self.backflush_cycle_start = Instant::now();
                 self.backflush_in_off_cycle = false;
                 self.open_valve();
-                self.set_pressure(config::MAX_PUMP_PRESSURE);
+                self.set_pressure(self.config.max_pressure);
             }
         }
     }
 
     // [ ] this needs to be calibrated, for now it's a guess
     fn duty_cycle_to_pressure(&self, duty_cycle: f32) -> Bar {
-        duty_cycle.clamp(0.0, 1.0) * config::MAX_PUMP_PRESSURE
+        duty_cycle.clamp(0.0, 1.0) * self.config.max_pressure
     }
 
     // [ ] this needs to be calibrated, for now it's a guess
     fn pressure_to_duty_cycle(&self, pressure: f32) -> f32 {
-        pressure.clamp(0.0, config::MAX_PUMP_PRESSURE) / config::MAX_PUMP_PRESSURE
+        pressure.clamp(0.0, self.config.max_pressure) / self.config.max_pressure
     }
 }

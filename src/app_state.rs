@@ -1,4 +1,5 @@
 use crate::board::Board;
+use crate::config::Config;
 use crate::schemas::event::EventBuffer;
 use crate::schemas::status::StatusReport;
 use crate::state_machines::{
@@ -7,7 +8,7 @@ use crate::state_machines::{
     ArcMutexState,
 };
 use std::default::Default;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 pub type ApiState = Arc<Mutex<ApiData>>;
 pub struct ApiData {
@@ -21,12 +22,22 @@ pub struct System {
     pub operational_state: Arc<Mutex<OperationalState>>,
     pub board: Board,
     pub events: Arc<Mutex<EventBuffer>>,
+    pub config: Arc<RwLock<Config>>,
 }
 
 impl System {
     pub fn new() -> Self {
+        #[cfg(not(feature = "simulate"))]
+        let config = Config::load_or_default();
+        #[cfg(feature = "simulate")]
+        let config = Config::default();
+        log::info!(
+            "Loaded config: {}",
+            serde_json::to_string_pretty(&config).unwrap()
+        );
+
         let operational_state = Arc::new(Mutex::new(OperationalState::default()));
-        let board = Board::new(operational_state.clone());
+        let board = Board::new(operational_state.clone(), &config);
 
         operational_state
             .transition(Transitions::Idle)
@@ -37,6 +48,7 @@ impl System {
             operational_state,
             board,
             events: Arc::new(Mutex::new(EventBuffer::new())),
+            config: Arc::new(RwLock::new(config)),
         }
     }
 

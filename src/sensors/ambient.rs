@@ -29,22 +29,26 @@ impl AmbientSensor {
                 std::thread::sleep(std::time::Duration::from_secs(5));
                 *temperature_probe_clone.write().unwrap() = GUESS_AT_AMBIENT_TEMP;
             }
-            for device_address in one_wire_bus.devices(false, &mut delay) {
-                match device_address {
-                    Ok(device_address) => {
-                        log::info!(
-                            "Found device at address {:?} with family code: {:#x?}",
-                            device_address,
-                            device_address.family_code()
-                        );
-                    }
-                    Err(e) => {
-                        log::error!("Error while searching for devices: {:?}", e);
-                        break;
+            let mut devices = 0;
+            while devices == 0 {
+                for device_address in one_wire_bus.devices(false, &mut delay) {
+                    match device_address {
+                        Ok(device_address) => {
+                            log::info!(
+                                "Found device at address {:?} with family code: {:#x?}",
+                                device_address,
+                                device_address.family_code()
+                            );
+                            devices += 1;
+                        }
+                        Err(e) => {
+                            log::error!("Error while searching for devices: {:?}", e);
+                            break;
+                        }
                     }
                 }
+                std::thread::sleep(std::time::Duration::from_secs(2));
             }
-            std::thread::sleep(std::time::Duration::from_secs(2));
 
             ds18b20::start_simultaneous_temp_measurement(&mut one_wire_bus, &mut delay).unwrap();
             Resolution::Bits12.delay_for_measurement_time(&mut delay);

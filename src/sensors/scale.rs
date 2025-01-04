@@ -1,8 +1,4 @@
-use crate::{
-    config,
-    kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value},
-    types::Grams,
-};
+use crate::{config::LoadCell as Config, types::Grams};
 use anyhow::Result;
 use esp_idf_svc::hal::{
     delay::Ets,
@@ -22,40 +18,6 @@ pub type LoadSensor<'a, SckPin, DtPin> =
 #[derive(Debug, Copy, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ScaleConfig {
     pub scaling: f32,
-}
-impl Default for ScaleConfig {
-    fn default() -> Self {
-        Self {
-            scaling: config::LOAD_SENSOR_SCALING,
-        }
-    }
-}
-
-impl From<&ScaleConfig> for Value {
-    fn from(params: &ScaleConfig) -> Self {
-        Value::ScaleParameters(*params)
-    }
-}
-
-impl Storable for ScaleConfig {
-    fn load_or_default() -> ScaleConfig {
-        let kvs = match KeyValueStore::new_blocking(std::time::Duration::from_millis(1000)) {
-            Ok(kvs) => kvs,
-            Err(e) => {
-                log::error!("Failed to create key value store: {:?}", e);
-                return Self::default();
-            }
-        };
-        match kvs.get(Key::ScaleParameters) {
-            Value::ScaleParameters(calibration) => calibration,
-            _ => Self::default(),
-        }
-    }
-
-    fn save(&self) -> Result<(), KvsError> {
-        let mut kvs = KeyValueStore::new_blocking(std::time::Duration::from_millis(1000))?;
-        kvs.set(Value::from(self))
-    }
 }
 
 pub enum Message {
@@ -177,17 +139,10 @@ where
         self.poll_interval
     }
 
-    pub fn start(
-        clock_pin: SckPin,
-        data_pin: DtPin,
-        poll_interval: Duration,
-        samples: usize,
-    ) -> Result<Interface> {
+    pub fn start(clock_pin: SckPin, data_pin: DtPin, config: &Config) -> Result<Interface> {
         let dt = PinDriver::input(data_pin)?;
         let sck = PinDriver::output(clock_pin)?;
         let mut load_sensor = HX711::new(sck, dt, Ets);
-
-        let scaling = ScaleConfig::load_or_default().scaling;
 
         let (tx, rx) = channel();
 
@@ -197,14 +152,14 @@ where
             flow: Arc::new(RwLock::new(0.0)),
         };
 
-        load_sensor.set_scale(scaling);
+        load_sensor.set_scale(config.scaling);
 
         let loadcell = Scale {
             load_sensor,
-            poll_interval,
+            poll_interval: config.sampling_rate,
             next_poll: Instant::now(),
             samples: Vec::new(),
-            samples_to_average: samples,
+            samples_to_average: config.window,
             interface: interface.clone(),
         };
 
@@ -214,9 +169,9 @@ where
                 let mut loadcell = loadcell;
 
                 while loadcell.is_ready() {
-                    std::thread::sleep(poll_interval);
+                    std::thread::sleep(loadcell.poll_interval);
                 }
-                loadcell.tare(samples);
+                loadcell.tare(32);
                 loop {
                     while let Ok(message) = rx.try_recv() {
                         match message {
@@ -227,7 +182,6 @@ where
                             Message::Scale(scaling) => {
                                 loadcell.samples.clear();
                                 loadcell.load_sensor.set_scale(scaling);
-                                let _ = ScaleConfig { scaling }.save();
                             }
                             Message::SetPollInterval(duration) => {
                                 loadcell.poll_interval = duration;

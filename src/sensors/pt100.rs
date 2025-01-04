@@ -1,47 +1,8 @@
-use crate::config;
-use crate::kv_store::{Error as KvsError, Key, KeyValueStore, Storable, Value};
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 pub struct Pt100 {
     pub calibration: f32,
-}
-
-impl From<&Pt100> for Value {
-    fn from(params: &Pt100) -> Self {
-        Value::TemperatureProbe(*params)
-    }
-}
-
-impl Default for Pt100 {
-    fn default() -> Self {
-        Pt100 {
-            calibration: config::PT_100_CALIBRATION_FACTOR,
-        }
-    }
-}
-
-impl Storable for Pt100 {
-    fn load_or_default() -> Self {
-        Self::default()
-        // [ ] add nvs
-        // let kvs = match KeyValueStore::new_blocking(std::time::Duration::from_millis(1000)) {
-        //     Ok(kvs) => kvs,
-        //     Err(e) => {
-        //         log::error!("Failed to create key value store: {:?}", e);
-        //         return Self::default();
-        //     }
-        // };
-        // match kvs.get(Key::TemperatureProbe) {
-        //     Value::TemperatureProbe(calibration) => calibration,
-        //     _ => Self::default(),
-        // }
-    }
-
-    fn save(&self) -> Result<(), KvsError> {
-        let mut kvs = KeyValueStore::new_blocking(std::time::Duration::from_millis(1000))?;
-        kvs.set(self.into())
-    }
 }
 
 impl Pt100 {
