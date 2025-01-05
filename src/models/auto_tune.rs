@@ -1,7 +1,6 @@
 use crate::components::boiler::{Message as ElementMessage, Mode as ElementMode};
 use crate::types::{Temperature, Watts};
 use crate::{config::AutoTune as Config, models::boiler::BoilerModelParameters};
-use esp_idf_hal::delay::FreeRtos;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -16,6 +15,7 @@ fn convert_to_dilated_time(duration: Duration) -> Duration {
     return duration;
 }
 
+#[cfg(feature = "simulate")]
 fn convert_to_dilated_time_secs_f32(duration: Duration) -> f32 {
     #[cfg(feature = "simulate")]
     return duration.as_secs_f32() * config::TIME_DILATION_FACTOR;
@@ -1007,6 +1007,7 @@ impl HeuristicAutoTuner {
         Ok(self.results)
     }
 
+    #[cfg(feature = "simulate")]
     pub fn auto_tune_blocking(&mut self) -> Result<BoilerModelParameters, Error> {
         loop {
             if let Some(res) = self.run()? {
@@ -1014,7 +1015,7 @@ impl HeuristicAutoTuner {
                 log::info!("Results: {:?}", res);
                 return Ok(res);
             }
-            FreeRtos::delay_ms(
+            esp_idf_hal::delay::FreeRtos::delay_ms(
                 (1000.0 * convert_to_dilated_time_secs_f32(self.sample_time)) as u32,
             );
         }

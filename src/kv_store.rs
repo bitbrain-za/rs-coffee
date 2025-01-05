@@ -3,11 +3,10 @@ use esp_idf_svc::nvs::*;
 use esp_idf_sys::EspError;
 use postcard::{from_bytes, to_vec};
 
-const MAX_VALUE_SIZE: usize = 2056;
+const MAX_VALUE_SIZE: usize = 256;
 
 #[derive(Debug)]
 pub enum Error {
-    Timeout,
     EspSys(EspError),
     Serialize(postcard::Error),
     NotFound(String),
@@ -16,7 +15,6 @@ pub enum Error {
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Error::Timeout => write!(f, "Timeout"),
             Error::EspSys(e) => write!(f, "ESP system error: {:?}", e),
             Error::Serialize(e) => write!(f, "Serialization error: {:?}", e),
             Error::NotFound(e) => write!(f, "Not found: {:?}", e),
@@ -86,31 +84,14 @@ pub struct KeyValueStore {
 }
 
 impl KeyValueStore {
-    pub fn new() -> Result<Self, String> {
-        let nvs_default_partition: EspNvsPartition<NvsDefault> = EspDefaultNvsPartition::take()
-            .map_err(|e| format!("Couldn't get default partition: {:?}", e))?;
+    pub fn new(nvs: Option<EspDefaultNvsPartition>) -> Result<Self, Error> {
+        let nvs_default_partition = match nvs {
+            Some(nvs) => nvs,
+            None => EspDefaultNvsPartition::take().map_err(Error::EspSys)?,
+        };
 
         let namespace = "rs-coffee";
-        let nvs = EspNvs::new(nvs_default_partition, namespace, true).map_err(|e| {
-            format!(
-                "Couldn't get namespace {:?} in default partition: {:?}",
-                namespace, e
-            )
-        })?;
+        let nvs = EspNvs::new(nvs_default_partition, namespace, true).map_err(Error::EspSys)?;
         Ok(Self { storage: nvs })
-    }
-
-    pub fn new_blocking(timeout: std::time::Duration) -> Result<Self, Error> {
-        let expires = std::time::Instant::now() + timeout;
-        loop {
-            match Self::new() {
-                Ok(store) => return Ok(store),
-                Err(_) => {
-                    if std::time::Instant::now() > expires {
-                        return Err(Error::Timeout);
-                    }
-                }
-            }
-        }
     }
 }

@@ -20,7 +20,6 @@ use app_state::System;
 use gpio::switch::SwitchesState;
 use state_machines::operational_fsm::OperationalState;
 use state_machines::system_fsm::{SystemState, Transition as SystemTransition};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -82,12 +81,8 @@ fn main() -> Result<()> {
     log::info!("Starting up");
 
     let system = System::new();
-    let api_state = app_state::ApiData {
-        echo_data: "Init".to_string(),
-        drink: None,
-    };
-    let api_state = Arc::new(Mutex::new(api_state));
-    let server = api::rest::create_server(api_state.clone())?;
+
+    let server = api::rest::create_server(system.clone())?;
     core::mem::forget(server);
 
     let config_mqtt = system.config.read().unwrap().mqtt.clone();
@@ -189,31 +184,28 @@ fn main() -> Result<()> {
                         );
                     }
                     OperationalState::AutoTuning => {
-                        #[cfg(feature = "simulate")]
-                        {
-                            if let Some(res) = auto_tuner.run()? {
-                                log::info!("Simulation completed");
-                                log::info!("Results: {:?}", res);
-                                info!(system, "Simulation Results: {:?}", res);
+                        if let Some(res) = auto_tuner.run()? {
+                            log::info!("Autotune completed");
+                            log::info!("Results: {:?}", res);
+                            info!(system, "Autotune Results: {:?}", res);
 
-                                let initial_boiler = auto_tuner.get_model_boiler_temperature();
+                            let initial_boiler = auto_tuner.get_model_boiler_temperature();
 
-                                let message = BoilerMessage::UpdateParameters {
-                                    parameters: res,
-                                    initial_probe_temperature: boiler_temperature,
-                                    initial_ambient_temperature: config::STAND_IN_AMBIENT,
-                                    initial_boiler_temperature: initial_boiler,
-                                };
+                            let message = BoilerMessage::UpdateParameters {
+                                parameters: res,
+                                initial_probe_temperature: boiler_temperature,
+                                initial_boiler_temperature: initial_boiler,
+                            };
 
-                                boiler.send_message(message);
+                            boiler.send_message(message);
 
-                                system
+                            system
                                     .operational_state
                                     .lock()
                                     .unwrap()
                                     .transition(crate::state_machines::operational_fsm::Transitions::AutoTuneComplete)
                                     .expect("Invalid transition :(");
-                            }
+                            loop_interval = Duration::from_millis(1000);
                         }
                     }
                     _ => {}

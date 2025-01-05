@@ -44,7 +44,7 @@ pub struct Board {
 }
 
 impl Board {
-    pub fn new(operational_state: Arc<Mutex<OperationalState>>, config: &Config) -> Self {
+    pub fn new(operational_state: Arc<Mutex<OperationalState>>, config: &mut Config) -> Self {
         operational_state
             .transition(Transitions::StartingUpStage("Board Setup".to_string()))
             .expect("Failed to set operational state");
@@ -85,6 +85,7 @@ impl Board {
         let sys_loop = EspSystemEventLoop::take().expect("Unable to take sysloop");
         let timer_service = EspTaskTimerService::new().expect("Failed to create timer service");
         let nvs = EspDefaultNvsPartition::take().expect("Failed to take nvs partition");
+        config.nvs = Some(nvs.clone());
 
         let mut wifi = AsyncWifi::wrap(
             EspWifi::new(peripherals.modem, sys_loop.clone(), Some(nvs))

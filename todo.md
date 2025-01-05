@@ -3,7 +3,7 @@
  - [ ] Review timer implementation (https://docs.esp-rs.org/esp-idf-svc/esp_idf_svc/timer/index.html)
  - [ ] Runtime WIFI config
  - [ ] Move ADC to I2C ADC (ADS1115)
- - [ ] Review config and NVS
+ - [ ] get/put Config endpoints (not working, need to get save dunctional)
  
  # 0.8
  - [ ] Add Availability

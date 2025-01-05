@@ -6,10 +6,11 @@ which idf.py >/dev/null || {
 
 case "$1" in
 "" | "release")
-    cargo build --release
+    cargo build --release --features=device_nvs
     ;;
 "debug")
-    cargo build
+    cargo build --features=device_nvs
+
     ;;
 *)
     echo "Wrong argument. Only \"debug\"/\"release\" arguments are supported"

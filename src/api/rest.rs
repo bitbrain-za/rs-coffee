@@ -1,5 +1,5 @@
 use super::{handlers_device, handlers_drinks};
-use crate::app_state::ApiState;
+use crate::app_state::System;
 use anyhow::{Error, Result};
 use embedded_svc::{
     http::{Headers, Method},
@@ -33,9 +33,17 @@ macro_rules! ok {
     }};
 }
 
-macro_rules! ok_with_data {
+macro_rules! ok_with_text {
     ($req:expr, $resp:expr) => {{
         let result = serde_json::json!({ "status": "success", "message": $resp }).to_string();
+        $req.into_ok_response()?.write_all(result.as_bytes())?;
+        Ok(())
+    }};
+}
+
+macro_rules! ok_with_json {
+    ($req:expr, $resp:expr) => {{
+        let result = serde_json::to_string_pretty(&$resp)?;
         $req.into_ok_response()?.write_all(result.as_bytes())?;
         Ok(())
     }};
@@ -49,7 +57,7 @@ macro_rules! bad_request {
     }};
 }
 
-pub fn create_server(system: ApiState) -> Result<EspHttpServer<'static>> {
+pub fn create_server(system: System) -> Result<EspHttpServer<'static>> {
     let server_configuration = esp_idf_svc::http::server::Configuration {
         stack_size: STACK_SIZE,
         ..Default::default()
@@ -60,17 +68,17 @@ pub fn create_server(system: ApiState) -> Result<EspHttpServer<'static>> {
     Ok(server)
 }
 
-fn create_router(server: &mut EspHttpServer<'static>, system: ApiState) -> Result<()> {
+fn create_router(server: &mut EspHttpServer<'static>, system: System) -> Result<()> {
     /* Device Endpoints */
     server.fn_handler::<Error, _>("/api/v1/version", Method::Get, |req| {
         let resp = handlers_device::version();
-        ok_with_data!(req, resp)
+        ok_with_text!(req, resp)
     })?;
 
     let my_system = system.clone();
     server.fn_handler::<Error, _>("/api/v1/echo", Method::Get, move |req| {
         match handlers_device::echo_get(my_system.clone()) {
-            Ok(data) => ok_with_data!(req, data),
+            Ok(data) => ok_with_text!(req, data),
             Err(e) => bad_request!(req, e),
         }
     })?;
@@ -87,7 +95,7 @@ fn create_router(server: &mut EspHttpServer<'static>, system: ApiState) -> Resul
     server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Put, move |mut req| {
         let data = handle_request_data!(req);
         match handlers_drinks::put_drink(&data, my_system.clone()) {
-            Ok(message) => ok_with_data!(req, message),
+            Ok(message) => ok_with_text!(req, message),
             Err(e) => bad_request!(req, e),
         }
     })?;
@@ -96,7 +104,24 @@ fn create_router(server: &mut EspHttpServer<'static>, system: ApiState) -> Resul
     server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Post, move |mut req| {
         let data = handle_request_data!(req);
         match handlers_drinks::post_drink(&data, my_system.clone()) {
-            Ok(message) => ok_with_data!(req, message),
+            Ok(message) => ok_with_text!(req, message),
+            Err(e) => bad_request!(req, e),
+        }
+    })?;
+
+    let my_system = system.clone();
+    server.fn_handler::<Error, _>("/api/v1/device/config", Method::Get, move |req| {
+        match handlers_device::get_config(my_system.clone()) {
+            Ok(data) => ok_with_json!(req, data),
+            Err(e) => bad_request!(req, e),
+        }
+    })?;
+
+    let my_system = system.clone();
+    server.fn_handler::<Error, _>("/api/v1/device/config", Method::Put, move |mut req| {
+        let data = handle_request_data!(req);
+        match handlers_device::set_config(&data, my_system.clone()) {
+            Ok(_) => ok!(req),
             Err(e) => bad_request!(req, e),
         }
     })?;

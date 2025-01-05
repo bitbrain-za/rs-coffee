@@ -1,10 +1,11 @@
 use crate::kv_store::*;
 use crate::types::*;
 use dotenv_codegen::dotenv;
+use esp_idf_svc::nvs::*;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 pub struct Config {
     pub mqtt: Mqtt,
     pub load_cell: LoadCell,
@@ -13,18 +14,22 @@ pub struct Config {
     pub pump: Pump,
     pub level_sensor: LevelSensor,
     pub indicator: Indicator,
+
+    #[serde(skip)]
+    pub nvs: Option<EspDefaultNvsPartition>,
 }
 
 impl Config {
-    // pub fn load_or_default() -> Self {
-    //     Self::default()
-    // }
-    pub fn load_or_default() -> Self {
-        match Self::try_load() {
+    pub fn load_or_default(nvs: &Option<EspDefaultNvsPartition>) -> Self {
+        match Self::try_load(nvs) {
             Ok(config) => config,
             Err(e) => {
                 log::error!("Failed to load config: {:?}, creating a default", e);
-                let cfg = Self::default();
+                let cfg = Self {
+                    nvs: nvs.clone(),
+                    ..Default::default()
+                };
+
                 if let Err(e) = cfg.save() {
                     log::error!("Failed to save default config: {:?}", e);
                 }
@@ -33,20 +38,30 @@ impl Config {
         }
     }
 
-    pub fn try_load() -> Result<Self, Error> {
-        let fs = KeyValueStore::new_blocking(Duration::from_secs(5))?;
+    pub fn try_load(nvs: &Option<EspDefaultNvsPartition>) -> Result<Self, Error> {
+        let fs = KeyValueStore::new(nvs.clone())?;
         let config = FileType::Config.load(&fs)?;
 
         match config {
-            File::Config(config) => Ok(config),
+            File::Config(mut config) => {
+                config.nvs = nvs.clone();
+                Ok(config)
+            }
             #[allow(unreachable_patterns)]
             _ => Err(Error::NotFound("Config".to_string())),
         }
     }
 
     pub fn save(&self) -> Result<(), Error> {
-        let mut fs = KeyValueStore::new_blocking(Duration::from_secs(5))?;
+        let mut fs = KeyValueStore::new(self.nvs.clone())?;
         File::Config(self.clone().to_owned()).save(&mut fs)
+    }
+
+    pub fn update(&mut self, new: Config) -> Result<(), Error> {
+        let mut new = new;
+        new.nvs = self.nvs.clone();
+        *self = new;
+        self.save()
     }
 }
 

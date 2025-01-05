@@ -10,14 +10,11 @@ use crate::state_machines::{
 use std::default::Default;
 use std::sync::{Arc, Mutex, RwLock};
 
-pub type ApiState = Arc<Mutex<ApiData>>;
-pub struct ApiData {
-    pub echo_data: String,
-    pub drink: Option<crate::schemas::drink::Drink>,
-}
-
 #[derive(Clone)]
 pub struct System {
+    pub echo_data: Arc<RwLock<String>>,
+    pub drink: Arc<RwLock<Option<crate::schemas::drink::Drink>>>,
+
     pub system_state: Arc<Mutex<SystemState>>,
     pub operational_state: Arc<Mutex<OperationalState>>,
     pub board: Board,
@@ -27,17 +24,17 @@ pub struct System {
 
 impl System {
     pub fn new() -> Self {
-        #[cfg(not(feature = "simulate"))]
-        let config = Config::load_or_default();
-        #[cfg(feature = "simulate")]
-        let config = Config::default();
+        #[cfg(not(feature = "device_nvs"))]
+        let mut config = Config::default();
+        #[cfg(feature = "device_nvs")]
+        let mut config = Config::load_or_default(&None);
         log::info!(
             "Loaded config: {}",
             serde_json::to_string_pretty(&config).unwrap()
         );
 
         let operational_state = Arc::new(Mutex::new(OperationalState::default()));
-        let board = Board::new(operational_state.clone(), &config);
+        let board = Board::new(operational_state.clone(), &mut config);
 
         operational_state
             .transition(Transitions::Idle)
@@ -49,6 +46,9 @@ impl System {
             board,
             events: Arc::new(Mutex::new(EventBuffer::new())),
             config: Arc::new(RwLock::new(config)),
+
+            echo_data: Arc::new(RwLock::new("".to_string())),
+            drink: Arc::new(RwLock::new(None)),
         }
     }
 
