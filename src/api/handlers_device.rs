@@ -20,9 +20,16 @@ pub fn get_config(system: System) -> Result<Value> {
     Ok(serde_json::to_value(&*config)?)
 }
 
-pub fn set_config(data: &str, system: System) -> Result<()> {
+pub fn set_config(data: &str, system: System) -> Result<Value> {
     let mut config = system.config.write().unwrap();
     let new_config: Config = serde_json::from_str(data)?;
     config.update(new_config)?;
-    Ok(())
+
+    system.schedule_reboot(std::time::Duration::from_secs(5))?;
+    let value = serde_json::json!(
+        {
+            "status": "success",
+            "message": "Configuration updated, rebooting in 5 seconds"
+    });
+    Ok(value)
 }

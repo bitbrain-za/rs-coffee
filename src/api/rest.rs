@@ -121,7 +121,7 @@ fn create_router(server: &mut EspHttpServer<'static>, system: System) -> Result<
     server.fn_handler::<Error, _>("/api/v1/device/config", Method::Put, move |mut req| {
         let data = handle_request_data!(req);
         match handlers_device::set_config(&data, my_system.clone()) {
-            Ok(_) => ok!(req),
+            Ok(value) => ok_with_json!(req, value),
             Err(e) => bad_request!(req, e),
         }
     })?;

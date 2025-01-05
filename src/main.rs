@@ -220,6 +220,14 @@ fn main() -> Result<()> {
                 panic!(system, "System is in a panic state: {}", message);
             }
 
+            (SystemState::Rebooting(instant), _) => {
+                // [ ] Shutdown pump, boiler, and put the countdown on the display
+                if instant < std::time::Instant::now() {
+                    log::info!("Rebooting");
+                    std::process::exit(0);
+                }
+            }
+
             (_, _) => {
                 log::error!("unhandled state")
             }

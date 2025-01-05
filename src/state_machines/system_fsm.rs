@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use super::FsmError as Error;
 
 #[derive(Debug, Clone)]
@@ -7,6 +9,7 @@ pub enum SystemState {
     Warning(String),
     Error(String),
     Panic(String),
+    Rebooting(Instant),
 }
 
 pub enum Transition {
@@ -16,6 +19,7 @@ pub enum Transition {
     Error(String),
     ClearErrros,
     Panic(String),
+    Reboot(Duration),
 }
 
 impl Default for SystemState {
@@ -32,6 +36,7 @@ impl std::fmt::Display for SystemState {
             SystemState::Warning(message) => write!(f, "Warning: {}", message),
             SystemState::Error(message) => write!(f, "Error: {}", message),
             SystemState::Panic(message) => write!(f, "Panic: {}", message),
+            SystemState::Rebooting(_) => write!(f, "Rebooting"),
         }
     }
 }
@@ -45,6 +50,7 @@ impl std::fmt::Display for Transition {
             Transition::Error(message) => write!(f, "Error: {}", message),
             Transition::ClearErrros => write!(f, "Clear Errors"),
             Transition::Panic(message) => write!(f, "Panic: {}", message),
+            Transition::Reboot(duration) => write!(f, "Reboot in {:?}", duration),
         }
     }
 }
@@ -97,7 +103,12 @@ impl SystemState {
             ))),
 
             /* --------------------------- */
-            /* --- Standby Transitions --- */
+            /* --- Normal Transitions --- */
+            /* --------------------------- */
+            (_, Transition::Reboot(delay)) => Ok(SystemState::Rebooting(Instant::now() + *delay)),
+
+            /* --------------------------- */
+            /* --- Unhandled Transitions --- */
             /* --------------------------- */
             (_, _) => Err(Error::InvalidStateTransition(format!(
                 "{} -> {}",

@@ -3,8 +3,8 @@ use crate::config::Config;
 use crate::schemas::event::EventBuffer;
 use crate::schemas::status::StatusReport;
 use crate::state_machines::{
-    operational_fsm::{OperationalState, Transitions},
-    system_fsm::SystemState,
+    operational_fsm::{OperationalState, Transitions as OperationalTransitions},
+    system_fsm::{SystemState, Transition as SystemTransitions},
     ArcMutexState,
 };
 use std::default::Default;
@@ -37,7 +37,7 @@ impl System {
         let board = Board::new(operational_state.clone(), &mut config);
 
         operational_state
-            .transition(Transitions::Idle)
+            .transition(OperationalTransitions::Idle)
             .expect("Failed to set operational state");
 
         System {
@@ -95,6 +95,14 @@ impl System {
     pub fn report_trace_event(&self, source: &str, message: String) {
         let mut event_buffer = self.events.lock().unwrap();
         event_buffer.trace(source, message);
+    }
+
+    pub fn schedule_reboot(
+        &self,
+        delay: std::time::Duration,
+    ) -> Result<(), crate::state_machines::FsmError> {
+        let mut state = self.system_state.lock().unwrap();
+        state.transition(SystemTransitions::Reboot(delay))
     }
 }
 
