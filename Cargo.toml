@@ -36,13 +36,17 @@ embassy = [
 [dependencies]
 anyhow = "=1.0.95"
 log = { version = "0.4", default-features = false }
-esp-idf-svc = { version = "0.49", default-features = false }
+esp-idf-svc = { version = "0.50", default-features = false, features = ["alloc", "experimental"] }
 pid-ctrl = "0.1.4"
-esp-idf-sys = { version = "0.35", features = ["binstart"] }
-esp-idf-hal = "0.44"
-ws2812-esp32-rmt-driver = { version = "0.10.0", features = [
+esp-idf-sys = { version = "0.36", features = ["binstart"] }
+# would be nice to remove the [default] rmt-legacy, but it's a bunch of work with the ws2812s
+esp-idf-hal = {version = "0.45" }
+ws2812-esp32-rmt-driver = { path = "../ws2812-esp32-rmt-driver", features = [
     "smart-leds-trait",
 ] }
+# ws2812-esp32-rmt-driver = { version = "0.10.0", features = [
+#     "smart-leds-trait",
+# ] }
 smart-leds = "0.4"
 smart-leds-trait = { version = "0.3" }
 smart_led_effects = "0.1.8"
@@ -59,4 +63,11 @@ one-wire-bus = { git = "https://github.com/daniel-larsen/one-wire-bus.git" }
 ds18b20 = { git = "https://github.com/elwerene/ds18b20.git"}
 
 [build-dependencies]
-embuild = "0.32.0"
+embuild = "0.33.0"
+
+# Need to move the ws2812-esp32-rmt-driver to the new interface before picking this up
+# [[package.metadata.esp-idf-sys.extra_components]]
+# remote_component = { name = "onewire_bus", version = "^1.0.2" }
+
+# [package.metadata.esp-idf-sys]
+# esp_idf_components = ["fatfs"]

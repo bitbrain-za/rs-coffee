@@ -1,4 +1,5 @@
-use crate::components::{boiler::Boiler, pump::Pump};
+use crate::components::sd_card;
+use crate::components::{boiler::Boiler, pump::Pump, sd_card::SdCard};
 use crate::config::Config;
 use crate::gpio::{adc::Adc, switch::Switches};
 use crate::indicator::ring::{Ring, State as IndicatorState};
@@ -14,6 +15,7 @@ use crate::state_machines::{
 };
 use core::convert::TryInto;
 use embedded_svc::wifi::{AuthMethod, ClientConfiguration, Configuration};
+use esp_idf_hal::adc::oneshot::config::Calibration;
 use esp_idf_hal::adc::{
     attenuation,
     oneshot::{config::AdcChannelConfig, AdcChannelDriver, AdcDriver},
@@ -80,6 +82,17 @@ impl Board {
             .expect("Failed to set operational state");
 
         let ambient_probe = crate::sensors::ambient::AmbientSensor::new(peripherals.pins.gpio3);
+
+        let sd_card = SdCard::new(
+            peripherals.spi2,
+            peripherals.pins.gpio12,
+            peripherals.pins.gpio13,
+            peripherals.pins.gpio11,
+            Some(peripherals.pins.gpio10),
+        )
+        .expect("Failed to create SD card");
+
+        sd_card.test().expect("Failed to test SD card");
 
         log::info!("Setting up wifi");
         let sys_loop = EspSystemEventLoop::take().expect("Unable to take sysloop");
@@ -148,7 +161,7 @@ impl Board {
                 let adc = AdcDriver::new(peripherals.adc1).expect("Failed to create ADC driver");
                 let channel_config = AdcChannelConfig {
                     attenuation: attenuation::DB_11,
-                    calibration: true,
+                    calibration: Calibration::None,
                     ..Default::default()
                 };
 

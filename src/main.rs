@@ -61,22 +61,12 @@ fn main() -> Result<()> {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    let logger = esp_idf_svc::log::EspLogger;
-    logger
-        .set_target_level("*", log::LevelFilter::Info)
-        .unwrap();
-    logger
-        .set_target_level("rmt(legacy)", log::LevelFilter::Info)
-        .unwrap();
-    logger
-        .set_target_level("efuse", log::LevelFilter::Info)
-        .unwrap();
-    logger
-        .set_target_level("temperature_sensor", log::LevelFilter::Info)
-        .unwrap();
-    logger
-        .set_target_level("rs_coffee", log::LevelFilter::Debug)
-        .unwrap();
+    log::set_max_level(log::LevelFilter::Debug);
+
+    esp_idf_svc::log::set_target_level("*", log::LevelFilter::Info).unwrap();
+    esp_idf_svc::log::set_target_level("*", log::LevelFilter::Info).unwrap();
+    esp_idf_svc::log::set_target_level("*", log::LevelFilter::Info).unwrap();
+    esp_idf_svc::log::set_target_level("rs_coffee", log::LevelFilter::Debug).unwrap();
 
     log::info!("Starting up");
 
