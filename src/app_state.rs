@@ -1,5 +1,6 @@
 use crate::board::Board;
 use crate::config::Config;
+use crate::schemas::drink::{Drink, Menu};
 use crate::schemas::event::EventBuffer;
 use crate::schemas::status::StatusReport;
 use crate::state_machines::{
@@ -13,13 +14,15 @@ use std::sync::{Arc, Mutex, RwLock};
 #[derive(Clone)]
 pub struct System {
     pub echo_data: Arc<RwLock<String>>,
-    pub drink: Arc<RwLock<Option<crate::schemas::drink::Drink>>>,
 
     pub system_state: Arc<Mutex<SystemState>>,
     pub operational_state: Arc<Mutex<OperationalState>>,
     pub board: Board,
     pub events: Arc<Mutex<EventBuffer>>,
     pub config: Arc<RwLock<Config>>,
+
+    pub sd_card_present: Arc<bool>,
+    pub menu: Arc<RwLock<Menu>>,
 }
 
 impl System {
@@ -40,6 +43,19 @@ impl System {
             .transition(OperationalTransitions::Idle)
             .expect("Failed to set operational state");
 
+        let sd_card_present = Arc::new(
+            crate::components::sd_card::SdCard::test()
+                .map(|_| true)
+                .unwrap_or(false),
+        );
+
+        let menu = Arc::new(RwLock::new(if *sd_card_present {
+            Drink::create_menu().unwrap_or_default()
+        } else {
+            log::warn!("No SD card present, menu will be empty");
+            Menu::default()
+        }));
+
         System {
             system_state: Arc::new(Mutex::new(SystemState::default())),
             operational_state,
@@ -48,7 +64,9 @@ impl System {
             config: Arc::new(RwLock::new(config)),
 
             echo_data: Arc::new(RwLock::new("".to_string())),
-            drink: Arc::new(RwLock::new(None)),
+
+            sd_card_present,
+            menu,
         }
     }
 

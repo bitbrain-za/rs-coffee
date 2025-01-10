@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["phil <philip.barlow@hidglobal.com>"]
 edition = "2021"
 resolver = "2"
-rust-version = "1.77"
+rust-version = "1.81"
 
 [[bin]]
 name = "rs-coffee"
@@ -12,6 +12,10 @@ harness = false    # do not use the built in cargo test harness -> resolve rust-
 
 [profile.release]
 opt-level = "s"
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
 
 [profile.dev]
 debug = true    # Symbols are nice and they don't increase the size on Flash

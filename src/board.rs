@@ -1,4 +1,3 @@
-use crate::components::sd_card;
 use crate::components::{boiler::Boiler, pump::Pump, sd_card::SdCard};
 use crate::config::Config;
 use crate::gpio::{adc::Adc, switch::Switches};
@@ -34,6 +33,7 @@ use std::thread;
 #[derive(Clone)]
 pub struct Board {
     pub indicator: Ring,
+    #[allow(dead_code)]
     pub onboard_rgb: Ring,
     pub temperature: Arc<RwLock<f32>>,
     pub ambient_temperature: Arc<RwLock<f32>>,
@@ -91,8 +91,7 @@ impl Board {
             Some(peripherals.pins.gpio10),
         )
         .expect("Failed to create SD card");
-
-        sd_card.test().expect("Failed to test SD card");
+        core::mem::forget(sd_card);
 
         log::info!("Setting up wifi");
         let sys_loop = EspSystemEventLoop::take().expect("Unable to take sysloop");

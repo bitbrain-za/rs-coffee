@@ -72,6 +72,12 @@ fn main() -> Result<()> {
 
     let system = System::new();
 
+    if *system.sd_card_present {
+        log::info!("SD card is present");
+    } else {
+        log::warn!("SD card is not present, data will not be saved");
+    }
+
     let server = api::rest::create_server(system.clone())?;
     core::mem::forget(server);
 
