@@ -12,10 +12,10 @@ harness = false    # do not use the built in cargo test harness -> resolve rust-
 
 [profile.release]
 opt-level = "s"
-strip = true
-lto = true
-codegen-units = 1
-panic = "abort"
+# strip = true
+# lto = true
+# codegen-units = 1
+# panic = "abort"
 
 [profile.dev]
 debug = true    # Symbols are nice and they don't increase the size on Flash

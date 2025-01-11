@@ -8,7 +8,9 @@
             "id": "esp",
             "top": -0.18,
             "left": 4.57,
-            "attrs": {}
+            "attrs": {
+                "flashSize": "16"
+            }
         },
         {
             "type": "wokwi-led",

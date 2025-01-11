@@ -1,8 +1,10 @@
 [wokwi]
 version = 1
 gdbServerPort = 3333
-elf = "target/xtensa-esp32s3-espidf/release/rs-coffee"
-firmware = "target/xtensa-esp32s3-espidf/release/rs-coffee"
+# elf = "target/xtensa-esp32s3-espidf/debug/rs-coffee"
+# firmware = "target/xtensa-esp32s3-espidf/debug/rs-coffee"
+elf = "rs_coffee_debug.bin"
+firmware = "rs_coffee_debug.bin"
 
 [net]
 gateway = "ws://localhost:9011"
