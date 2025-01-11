@@ -1,13 +1,17 @@
 use crate::app_state::System;
+#[cfg(feature = "sdcard")]
 use crate::schemas::drink::Drink;
 use anyhow::Result;
-impl std::error::Error for Error {}
 
+#[cfg(feature = "sdcard")]
 #[derive(Debug)]
 pub enum Error {
     System(String),
 }
 
+#[cfg(feature = "sdcard")]
+impl std::error::Error for Error {}
+#[cfg(feature = "sdcard")]
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -16,6 +20,7 @@ impl std::fmt::Display for Error {
     }
 }
 
+#[cfg(feature = "sdcard")]
 pub fn put_drink(data: &str, system: System) -> Result<()> {
     if !*system.sd_card_present {
         Err(Error::System("No SD card present".to_string()).into())
@@ -31,6 +36,7 @@ pub fn put_drink(data: &str, system: System) -> Result<()> {
     }
 }
 
+#[cfg(feature = "sdcard")]
 pub fn get_drink(data: &str, system: System) -> Result<serde_json::Value> {
     if !*system.sd_card_present {
         Err(Error::System("No SD card present".to_string()).into())

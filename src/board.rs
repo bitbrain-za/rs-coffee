@@ -1,4 +1,6 @@
-use crate::components::{boiler::Boiler, pump::Pump, sd_card::SdCard};
+#[cfg(feature = "sdcard")]
+use crate::components::sd_card::SdCard;
+use crate::components::{boiler::Boiler, pump::Pump};
 use crate::config::Config;
 use crate::gpio::{adc::Adc, switch::Switches};
 use crate::indicator::ring::{Ring, State as IndicatorState};
@@ -83,19 +85,22 @@ impl Board {
 
         let ambient_probe = crate::sensors::ambient::AmbientSensor::new(peripherals.pins.gpio3);
 
-        let sd_card = SdCard::new(
-            peripherals.spi2,
-            peripherals.pins.gpio12,
-            peripherals.pins.gpio13,
-            peripherals.pins.gpio11,
-            Some(peripherals.pins.gpio10),
-        );
+        #[cfg(feature = "sdcard")]
+        {
+            let sd_card = SdCard::new(
+                peripherals.spi2,
+                peripherals.pins.gpio12,
+                peripherals.pins.gpio13,
+                peripherals.pins.gpio11,
+                Some(peripherals.pins.gpio10),
+            );
 
-        if let Ok(card) = sd_card {
-            log::debug!("SD Card initialized");
-            core::mem::forget(card);
-        } else {
-            log::error!("Failed to initialize SD Card");
+            if let Ok(card) = sd_card {
+                log::debug!("SD Card initialized");
+                core::mem::forget(card);
+            } else {
+                log::error!("Failed to initialize SD Card");
+            }
         }
 
         log::info!("Setting up wifi");

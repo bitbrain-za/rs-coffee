@@ -91,24 +91,30 @@ fn create_router(server: &mut EspHttpServer<'static>, system: System) -> Result<
     })?;
 
     /* Drink Endpoints */
-    let my_system = system.clone();
-    server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Get, move |req| {
-        log::info!("Request: {:?}", req.uri());
-        let data = req.uri().to_string();
-        match handlers_drinks::get_drink(&data, my_system.clone()) {
-            Ok(json) => ok_with_json!(req, json),
-            Err(e) => bad_request!(req, e),
-        }
-    })?;
+    #[cfg(feature = "sdcard")]
+    {
+        let my_system = system.clone();
+        server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Get, move |req| {
+            log::info!("Request: {:?}", req.uri());
+            let data = req.uri().to_string();
+            match handlers_drinks::get_drink(&data, my_system.clone()) {
+                Ok(json) => ok_with_json!(req, json),
+                Err(e) => bad_request!(req, e),
+            }
+        })?;
+    }
 
-    let my_system = system.clone();
-    server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Put, move |mut req| {
-        let data = handle_request_data!(req);
-        match handlers_drinks::put_drink(&data, my_system.clone()) {
-            Ok(message) => ok_with_text!(req, message),
-            Err(e) => bad_request!(req, e),
-        }
-    })?;
+    #[cfg(feature = "sdcard")]
+    {
+        let my_system = system.clone();
+        server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Put, move |mut req| {
+            let data = handle_request_data!(req);
+            match handlers_drinks::put_drink(&data, my_system.clone()) {
+                Ok(message) => ok_with_text!(req, message),
+                Err(e) => bad_request!(req, e),
+            }
+        })?;
+    }
 
     let my_system = system.clone();
     server.fn_handler::<Error, _>("/api/v1/coffee/drink", Method::Post, move |mut req| {

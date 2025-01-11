@@ -72,6 +72,7 @@ fn main() -> Result<()> {
 
     let system = System::new();
 
+    #[cfg(feature = "sdcard")]
     if *system.sd_card_present {
         log::info!("SD card is present");
     } else {

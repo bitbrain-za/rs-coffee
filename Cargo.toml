@@ -22,9 +22,10 @@ debug = true    # Symbols are nice and they don't increase the size on Flash
 opt-level = "z"
 
 [features]
-default = ["std", "embassy", "esp-idf-svc/native", "device_nvs"]
+default = ["std", "embassy", "esp-idf-svc/native", "device_nvs", "sdcard"]
 simulate = ["dep:rand", "dep:rand_distr"]
 device_nvs = []
+sdcard = []
 
 pio = ["esp-idf-svc/pio"]
 std = ["alloc", "esp-idf-svc/binstart", "esp-idf-svc/std"]

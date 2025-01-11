@@ -1,9 +1,13 @@
 use super::{postinfusion::PostInfusion, preinfusion::PreInfusion, shot::Shot, Error};
+#[cfg(feature = "sdcard")]
 use crate::components::sd_card::SdCard;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "sdcard")]
 use serde_json;
 use std::collections::BTreeMap;
+#[cfg(feature = "sdcard")]
 use std::fs::{read_dir, File};
+#[cfg(feature = "sdcard")]
 use std::io::{Read, Write};
 
 pub type Menu = BTreeMap<u32, String>;
@@ -29,6 +33,7 @@ impl Drink {
         Ok(())
     }
 
+    #[cfg(feature = "sdcard")]
     pub fn save(&self, menu: &mut Menu) -> anyhow::Result<()> {
         let mut next_file = 0;
         for i in 0..=menu.values().len() as u32 {
@@ -66,6 +71,7 @@ impl Drink {
         Ok(())
     }
 
+    #[cfg(feature = "sdcard")]
     fn fetch_drink(number: u32) -> anyhow::Result<Self> {
         let path = format!(
             "{}/{}.{}",
@@ -86,6 +92,7 @@ impl Drink {
         Ok(drink)
     }
 
+    #[cfg(feature = "sdcard")]
     pub fn load_drink(name: &str, menu: &Menu) -> anyhow::Result<Drink> {
         for (number, drink_name) in menu {
             if drink_name == name {
@@ -95,6 +102,7 @@ impl Drink {
         Err(anyhow::anyhow!("Drink not found"))
     }
 
+    #[cfg(feature = "sdcard")]
     pub fn load_all_drinks() -> anyhow::Result<Vec<Drink>> {
         let menu = Self::create_menu()?;
         let mut drinks = Vec::new();
@@ -106,6 +114,7 @@ impl Drink {
         Ok(drinks)
     }
 
+    #[cfg(feature = "sdcard")]
     pub fn create_menu() -> anyhow::Result<Menu> {
         let directory = read_dir(SdCard::DRINKS_DIRECTORY).inspect_err(|e| {
             log::error!("Failed to read directory: {}", e);
