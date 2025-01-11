@@ -89,9 +89,14 @@ impl Board {
             peripherals.pins.gpio13,
             peripherals.pins.gpio11,
             Some(peripherals.pins.gpio10),
-        )
-        .expect("Failed to create SD card");
-        core::mem::forget(sd_card);
+        );
+
+        if let Ok(card) = sd_card {
+            log::debug!("SD Card initialized");
+            core::mem::forget(card);
+        } else {
+            log::error!("Failed to initialize SD Card");
+        }
 
         log::info!("Setting up wifi");
         let sys_loop = EspSystemEventLoop::take().expect("Unable to take sysloop");
