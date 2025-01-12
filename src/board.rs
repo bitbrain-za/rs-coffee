@@ -24,6 +24,7 @@ use esp_idf_hal::adc::{
 use esp_idf_svc::hal::task::block_on;
 use esp_idf_svc::hal::{delay::FreeRtos, prelude::Peripherals};
 use esp_idf_svc::timer::EspTaskTimerService;
+use esp_idf_svc::wifi::WifiDeviceId;
 use esp_idf_svc::{
     eventloop::EspSystemEventLoop,
     nvs::EspDefaultNvsPartition,
@@ -45,6 +46,7 @@ pub struct Board {
     pub pump: Pump,
     pub boiler: Boiler,
     pub level_sensor: A02yyuw,
+    pub mac: Arc<String>,
 }
 
 impl Board {
@@ -116,6 +118,15 @@ impl Board {
             timer_service,
         )
         .expect("Failed to create async wifi");
+
+        let mac = wifi
+            .wifi()
+            .get_mac(WifiDeviceId::Sta)
+            .expect("Failed to get MAC");
+        let mac: String = mac.iter().map(|b| format!("{:02X}", b)).collect();
+
+        log::info!("Wifi MAC: {:?}", mac);
+
         match block_on(Self::connect_wifi(&mut wifi)) {
             Ok(_) => {
                 let ip_info = wifi
@@ -258,6 +269,7 @@ impl Board {
             boiler,
             pressure: pressure_probe,
             level_sensor,
+            mac: Arc::new(mac),
         }
     }
 
@@ -296,6 +308,7 @@ impl Board {
             ambient: *self.ambient_temperature.read().unwrap(),
             level: *self.level_sensor.distance.read().unwrap(),
             power: 0.0,
+            switches: self.switches.get_report(),
         }
     }
 }

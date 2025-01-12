@@ -1,3 +1,4 @@
+use crate::schemas::status::Switches as Report;
 use esp_idf_hal::gpio::{PinDriver, Pull};
 use esp_idf_svc::hal::gpio::{InputPin, OutputPin};
 use std::{
@@ -133,5 +134,13 @@ impl Switches {
         let steam = *self.steam_switch_state.read().unwrap();
 
         SwitchesState::Idle.update(brew, hot_water, steam)
+    }
+
+    pub fn get_report(&self) -> Report {
+        Report {
+            brew: *self.brew_switch_state.read().unwrap() == SwitchState::Active,
+            water: *self.hot_water_switch_state.read().unwrap() == SwitchState::Active,
+            steam: *self.steam_switch_state.read().unwrap() == SwitchState::Active,
+        }
     }
 }

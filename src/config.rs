@@ -84,10 +84,12 @@ impl Default for Mqtt {
         const DEFAULT_EVENT_LEVEL: crate::schemas::event::LevelFilter =
             crate::schemas::event::LevelFilter::Info;
         let client_id = dotenv!("MQTT_CLIENT_ID").to_string();
+        let name = dotenv!("NAME").to_lowercase();
+
         Mqtt {
             report_interval: DEFAULT_REPORT_INTERVAL,
-            status_topic: format!("{}/{}", client_id, "status"),
-            event_topic: format!("{}/{}", client_id, "event"),
+            status_topic: format!("{}/<ID>/state", name),
+            event_topic: format!("{}/<ID>/event", name),
             event_level: DEFAULT_EVENT_LEVEL,
             broker: dotenv!("MQTT_SERVER").try_into().expect("Invalid MQTT URL"),
             client_id,

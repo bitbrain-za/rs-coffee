@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -e
 
 if [ $# -ne 1 ] || [[ ! "$1" =~ ^(debug|release)$ ]]; then
     echo "Usage: $0 [debug|release]"

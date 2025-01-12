@@ -2,6 +2,12 @@ use crate::types::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct Switches {
+    pub brew: bool,
+    pub water: bool,
+    pub steam: bool,
+}
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Device {
     pub temperature: Temperature,
     pub pressure: Bar,
@@ -9,6 +15,7 @@ pub struct Device {
     pub ambient: Temperature,
     pub power: Watts,
     pub level: Millimeters,
+    pub switches: Switches,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
