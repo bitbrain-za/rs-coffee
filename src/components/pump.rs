@@ -47,7 +47,11 @@ impl Pump {
         self.mailbox.send(Message::Off).unwrap();
     }
     pub fn set_pressure(&self, pressure: Bar) {
-        self.mailbox.send(Message::SetPressure(pressure)).unwrap();
+        if pressure == 0.0 {
+            self.mailbox.send(Message::Off).unwrap();
+        } else {
+            self.mailbox.send(Message::SetPressure(pressure)).unwrap();
+        }
     }
     pub fn turn_on_for_yield(&self, pressure: Bar, grams: Grams) {
         self.mailbox

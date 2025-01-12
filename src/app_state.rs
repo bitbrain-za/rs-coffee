@@ -130,6 +130,20 @@ impl System {
         let mut state = self.system_state.lock().unwrap();
         state.transition(SystemTransitions::Reboot(delay))
     }
+
+    pub fn set_temperature(&self, temperature: f32) {
+        self.board
+            .boiler
+            .send_message(crate::components::boiler::Message::SetMode(
+                crate::components::boiler::Mode::Mpc {
+                    target: temperature,
+                },
+            ));
+    }
+
+    pub fn set_pressure(&self, pressure: f32) {
+        self.board.pump.set_pressure(pressure);
+    }
 }
 
 #[macro_export]

@@ -95,21 +95,21 @@ impl HomeAssistantIntegration {
                     "name": "Brew Switch",
                     "icon": "mdi:coffee-maker-outline",
                     "p": "binary_sensor",
-                    "value_template": "{{ value_json.device.switches.brew}}",
+                    "value_template": "{{ 'ON' if value_json.device.switches.brew else 'OFF'}}",
                     "unique_id": "switch_brew"
                 },
                 "switch_water": {
                     "name": "Water Switch",
                     "icon": "mdi:water",
                     "p": "binary_sensor",
-                    "value_template": "{{ value_json.device.switches.water}}",
+                    "value_template": "{{ 'ON' if value_json.device.switches.water else 'OFF'}}",
                     "unique_id": "switch_water"
                 },
                 "switch_steam": {
                     "name": "Steam Switch",
                     "icon": "mdi:kettle-steam",
                     "p": "binary_sensor",
-                    "value_template": "{{ value_json.device.switches.steam}}",
+                    "value_template": "{{ 'ON' if value_json.device.switches.steam else 'OFF'}}",
                     "unique_id": "switch_pump"
                 },
                 "boiler_target": {
@@ -118,7 +118,7 @@ impl HomeAssistantIntegration {
                     "unit_of_measurement": "°C",
                     "value_template": "{{ value_json.device.temperature}}",
                     "unique_id": "boiler_target",
-                    "command_topic": format!("{}/{}/set/boiler_temperature", name_lc, id),
+                    "command_topic": format!("{}/{}/set/temperature", name_lc, id),
                     "max": 140,
                     "min": 0,
                     "step": 0.1
@@ -129,7 +129,7 @@ impl HomeAssistantIntegration {
                     "unit_of_measurement": "bar",
                     "value_template": "{{ value_json.device.pressure}}",
                     "unique_id": "pump_target",
-                    "command_topic": format!("{}/{}/set/pump_pressure", name_lc, id),
+                    "command_topic": format!("{}/{}/set/pressure", name_lc, id),
                     "max": 12,
                     "min": 0,
                     "step": 0.5
