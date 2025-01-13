@@ -2,13 +2,10 @@
  - [ ] works same as normal but with temperature control, level sensing and auto-tuning
  - [ ] Review timer implementation (https://docs.esp-rs.org/esp-idf-svc/esp_idf_svc/timer/index.html)
  - [ ] Runtime WIFI config/WPS
- - [ ] Move ADC to I2C ADC (ADS1115)
- - [ ] OTA https://quan.hoabinh.vn/post/2024/03/programming-esp32-with-rust-ota-firmware-update
- - [ ] HA integration
-    - [x] discovery
-    - [x] state topic
-    - [ ] control
-
+ - [ ] OTA
+     - https://quan.hoabinh.vn/post/2024/03/programming-esp32-with-rust-ota-firmware-update
+     - https://github.com/Hard-Stuff/OTA-Hub-diy-piolib-device_client
+     - Local hosted to start, github CI in the future
  
  # 0.8
  - [ ] Add Availability
@@ -18,3 +15,4 @@
  - [ ] Display
  - [ ] Add endpoint to set loadcell scaling
  - [ ] Move DS18b20 to RMT driver on next esp-idf-hal release
+ - [ ] Move ADC to I2C ADC (ADS1115)
